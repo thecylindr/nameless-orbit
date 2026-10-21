@@ -43,6 +43,24 @@ void remember(const QString &name)
     if (name.isEmpty()) { f.remove(); return; }
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) f.write(name.toUtf8());
 }
+// Страж: отдельный процесс, переживающий Orbit. Если Orbit убит (kill -9, падение, принудительное закрытие показа), виртуальный монитор остался бы в Hyprland:
+// курсор и окна уходили на невидимый экран, рабочий стол не возвращался, захват висел. Страж ждёт смерти Orbit и, если файл «осталось от запуска» ещё
+// содержит имя монитора (при штатном выходе destroy() его стирает), убирает монитор и добивает осиротевший wf-recorder этого монитора
+void guard(const QString &name)
+{
+    static bool started = false;          // один страж на запуск Orbit: имя монитора всегда одно, а файл-метка перезаписывается при каждом создании
+    if (started) return;
+    started = true;
+    const QString script = QStringLiteral(
+        "pid=\"$1\"; name=\"$2\"; state=\"$3\"; "
+        "while kill -0 \"$pid\" 2>/dev/null; do sleep 1; done; "
+        "sleep 1; [ \"$(cat \"$state\" 2>/dev/null)\" = \"$name\" ] || exit 0; "
+        "for p in $(pgrep -x wf-recorder); do tr '\\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -q -- \" -o $name \" && kill \"$p\" 2>/dev/null; done; "
+        "hyprctl output remove \"$name\" >/dev/null 2>&1; rm -f \"$state\"");
+    QProcess::startDetached(QStringLiteral("sh"), {QStringLiteral("-c"), script, QStringLiteral("orbit-guard"),
+                                                   QString::number(QCoreApplication::applicationPid()), name, stateFile()});
+}
+
 
 QJsonObject driftwmState()
 {
@@ -176,6 +194,7 @@ bool create(const Spec &spec, QString *outName, QString *error)
         }
     }
     remember(name);
+    guard(name);
     *outName = name;
     return true;
 }

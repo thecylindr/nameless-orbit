@@ -6,6 +6,7 @@
 
 #include <QGuiApplication>
 #include <QTimer>
+#include <QDebug>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QIcon>
@@ -31,6 +32,7 @@
 #include "remote/RemoteDesktopController.h"
 #include "remote/EdgeCrossing.h"
 #include "remote/VirtualDisplay.h"
+#include "remote/HyprIpc.h"
 #include "remote/FrameView.h"
 #include <QtQml/qqml.h>
 
@@ -49,6 +51,9 @@ QIcon appIcon()
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+    if (HyprIpc::recoverSignature()) qInfo() << "Orbit: переменная HYPRLAND_INSTANCE_SIGNATURE не была задана — Hyprland найден по сокету в" << qgetenv("XDG_RUNTIME_DIR") + "/hypr";
+#endif
     QCoreApplication::setApplicationName(QStringLiteral("NameLess Orbit"));
     QCoreApplication::setApplicationVersion(QStringLiteral(APP_VERSION_STR));
     QCoreApplication::setOrganizationName(QStringLiteral("glassrice"));
