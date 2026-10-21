@@ -183,7 +183,8 @@ bool create(const Spec &spec, QString *outName, QString *error)
 void destroy(const QString &outName)
 {
     if (outName.isEmpty()) return;
-    run(QStringLiteral("hyprctl"), {QStringLiteral("output"), QStringLiteral("remove"), outName});
+    // без ожидания: hyprctl мог отвечать секундами, пока Hyprland пересобирает мониторы, — окно Orbit в это время подвисало
+    QProcess::startDetached(QStringLiteral("hyprctl"), {QStringLiteral("output"), QStringLiteral("remove"), outName});
     remember(QString());
 }
 
