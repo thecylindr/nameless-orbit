@@ -17,7 +17,7 @@ class RunCommandPlugin;
 // видят состояние и управляют Orbit без его окна.
 //   сервис  org.glassrice.NamelessOrbit, объект /org/glassrice/NamelessOrbit, интерфейс org.glassrice.NamelessOrbit
 //   методы  Status() → JSON, Scan(), SetDiscovery(b), Connect(id), ConnectAddress(host, port), Disconnect(id), AcceptPairing(id),
-//           RejectPairing(id), Ring(id), StopRing(id), SendClipboard(id), SendFile(id, path), RunCommand(id, commandId), ViewScreen(id), ShareScreen(id), Notify(title, body, id|""), Show(), Quit()
+//           RejectPairing(id), Ring(id), StopRing(id), SendClipboard(id), SendFile(id, path), RunCommand(id, commandId), ViewScreen(id), ShareScreen(id), SecondScreen(id), Notify(title, body, id|""), Show(), Quit()
 //   сигнал  Changed() — состояние изменилось, можно перечитать Status(); отправляется вручную (notifyChanged), пачки склеиваются
 // Сопряжение подтверждает человек: NameLess UI показывает тот же код, что и окно Orbit, и вызывает AcceptPairing только по
 // нажатию. Разрешения для устройств и удалённый экран через D-Bus не управляются — они остаются в самом Orbit
@@ -55,12 +55,15 @@ public slots:
     // экран устройства: смотреть его (запрос показа и окно просмотра) или показать ему свой; выполняет главный код — через сигнал screenRequested
     void ViewScreen(const QString &deviceId) { emit screenRequested(deviceId, true); }
     void ShareScreen(const QString &deviceId) { emit screenRequested(deviceId, false); }
+    // это устройство становится вторым монитором компьютера deviceId (с настройками по умолчанию); выполняет главный код — через сигнал secondScreenRequested
+    void SecondScreen(const QString &deviceId) { emit secondScreenRequested(deviceId); }
     void Show() { emit showRequested(); }
     void Quit() { emit quitRequested(); }
 
 signals:
     void showRequested();
     void screenRequested(const QString &deviceId, bool view);      // не экспортируется на шину — слушает main.cpp
+    void secondScreenRequested(const QString &deviceId);           // не экспортируется на шину — слушает main.cpp
     void quitRequested();                 // не экспортируется на шину — слушает main.cpp и показывает окно
 
 private:

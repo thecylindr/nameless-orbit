@@ -416,6 +416,7 @@ QStringList PeerManager::enabledCapabilities() const
     QStringList out;
     for (auto it = m_plugins.constBegin(); it != m_plugins.constEnd(); ++it)
         if (it.value()->isEnabled()) out.append(it.key());
+    out.append(m_localCaps);
     return out;
 }
 

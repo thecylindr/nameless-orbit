@@ -1,7 +1,7 @@
 // NameLess Orbit — связь между своими устройствами в локальной сети: обнаружение, сопряжение, буфер обмена,
 // уведомления, батарея, медиа, команды, демонстрация и управление экраном. Подробно — в README.md.
 #ifndef APP_VERSION_STR
-#define APP_VERSION_STR "0.2.1"
+#define APP_VERSION_STR "0.2.2"
 #endif
 
 #include <QGuiApplication>
@@ -67,6 +67,7 @@ int main(int argc, char *argv[])
     TrustStore trustStore;
     PeerManager peerManager(&identity, &trustStore);
     VirtualDisplay::cleanupStale();      // виртуальный монитор «второго экрана» мог остаться от прошлого запуска (Orbit упал)
+    if (VirtualDisplay::backend() != VirtualDisplay::Backend::None) peerManager.addLocalCapability(QStringLiteral("secondScreen"));      // другие устройства видят, что здесь можно создать второй экран
     SettingsManager settings;
     CommandStore commandStore;
     ThemeManager theme;
@@ -243,6 +244,15 @@ int main(int argc, char *argv[])
     QObject::connect(&orbitDBus, &OrbitDBus::screenRequested, &app, [&](const QString &id, bool view) {
         if (view) { remoteDesktop.requestShare(id); emit orbitDBus.showRequested(); }
         else remoteDesktop.offerShare(id);
+    });
+    // «Второй монитор» из Nameless UI: это устройство занимает место ещё одного монитора другого компьютера (параметры — по умолчанию:
+    // как сейчас, родное разрешение, 60 к/с, справа от основного; тонкая настройка — на странице устройства в Orbit)
+    QObject::connect(&orbitDBus, &OrbitDBus::secondScreenRequested, &app, [&](const QString &id) {
+        QVariantMap spec;
+        spec[QStringLiteral("orientation")] = QStringLiteral("auto"); spec[QStringLiteral("res")] = QStringLiteral("native");
+        spec[QStringLiteral("fps")] = 60; spec[QStringLiteral("side")] = QStringLiteral("right"); spec[QStringLiteral("scale")] = QStringLiteral("auto");
+        spec[QStringLiteral("mode")] = QStringLiteral("extend"); spec[QStringLiteral("audio")] = QStringLiteral("auto");
+        remoteDesktop.requestSecondScreen(id, spec); emit orbitDBus.showRequested();
     });
     QObject::connect(&orbitDBus, &OrbitDBus::quitRequested, &app, &QCoreApplication::quit);
     QObject::connect(&orbitDBus, &OrbitDBus::showRequested, &app, [&engine]() {

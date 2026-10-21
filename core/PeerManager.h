@@ -34,6 +34,7 @@ class PeerManager : public QObject
     Q_PROPERTY(TrustStore *trustStore READ trustStore CONSTANT)
 
 public:
+    void addLocalCapability(const QString &name) { if (!m_localCaps.contains(name)) m_localCaps.append(name); }      // сообщается другим устройствам вместе со списком плагинов
     explicit PeerManager(Identity *identity, TrustStore *trustStore, QObject *parent = nullptr);
 
     bool discoveryActive() const;
@@ -108,6 +109,7 @@ private:
     void dial(const QString &deviceId, const QHostAddress &addr, quint16 port);
     bool prefers(Peer *p) const;                  // какое из двух встречных подключений оставить (одинаково у обеих сторон)
     QStringList enabledCapabilities() const;
+    QStringList m_localCaps;                      // возможности самого устройства, не плагины (например «secondScreen» — есть где создать виртуальный монитор)
 
     Identity *m_identity;
     TrustStore *m_trustStore;
