@@ -149,6 +149,20 @@ install(TARGETS nameless-orbit
     LIBRARY DESTINATION lib      # на Android цель собирается как модуль (.so), ему нужен свой каталог
 )
 
+# Самодостаточная папка (для deploy/package.sh: архив и AppImage): библиотеки Qt, плагины и модули QML кладутся рядом с программой.
+# Скрипт упаковки готовится всегда, но срабатывает только когда установку просят о нём (cmake -DORBIT_BUNDLE_QT=ON -P …, как делает package.sh):
+# обычная установка и пакет Arch используют системный Qt и ничего не копируют
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+    set_target_properties(nameless-orbit PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib")
+    qt_generate_deploy_qml_app_script(
+        TARGET nameless-orbit
+        OUTPUT_SCRIPT orbit_deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+        NO_TRANSLATIONS
+    )
+    install(CODE "if(ORBIT_BUNDLE_QT)\n    include(\"${orbit_deploy_script}\")\nendif()")
+endif()
+
 # .desktop и иконка для Linux (меню приложений, Wayland берёт значок по StartupWMClass/desktop-файлу)
 if(UNIX AND NOT APPLE)
     install(FILES packaging/nameless-orbit.desktop DESTINATION share/applications)
