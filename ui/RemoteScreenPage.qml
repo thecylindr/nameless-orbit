@@ -543,9 +543,10 @@ Page {
     property bool kbPaused: false
     readonly property bool kbWanted: page.second && !IsMobile && page.live && Window.window !== null && Window.window.active && !kbPaused
     onKbWantedChanged: RemoteDesktop.setKeyboardGrab(kbWanted)
+    // окно — через страницу: у Connections (не Item) прикреплённого Window нет
     Connections {
-        target: Window.window
-        function onActiveChanged() { if (Window.window && !Window.window.active) page.kbPaused = false; }
+        target: page.Window.window
+        function onActiveChanged() { if (page.Window.window && !page.Window.window.active) page.kbPaused = false; }
     }
     Connections {
         target: RemoteDesktop

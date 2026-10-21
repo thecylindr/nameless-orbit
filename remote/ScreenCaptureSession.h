@@ -128,6 +128,10 @@ private:
     void startWf();
     void stopWf(bool keepActive = false);
     void scheduleWfRestart(int delayMs = 1200);       // перезапуск кодера с новыми параметрами (изменения в пределах задержки копятся)
+    // то же для подстройки «лесенки» под сеть: не чаще раза в WF_TUNE_GAP_MS — каждый перезапуск кодера это 0,3–0,8 с без кадров,
+    // а сеть колеблется постоянно; последние значения применит ближайший разрешённый перезапуск
+    void scheduleTuneRestart();
+    qint64 m_wfStartedMs = 0;
     void onWfData();
     void onWfFrame(const QByteArray &jpeg);
     void onVideoData();                                      // разбор потока H.264 на кадры

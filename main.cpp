@@ -1,7 +1,7 @@
 // NameLess Orbit — связь между своими устройствами в локальной сети: обнаружение, сопряжение, буфер обмена,
 // уведомления, батарея, медиа, команды, демонстрация и управление экраном. Подробно — в README.md.
 #ifndef APP_VERSION_STR
-#define APP_VERSION_STR "0.2.3"
+#define APP_VERSION_STR "0.2.4"
 #endif
 
 #include <QGuiApplication>

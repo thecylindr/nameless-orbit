@@ -1,4 +1,5 @@
 #include "ScreenCaptureSession.h"
+#include "HyprIpc.h"
 #include "VirtualDisplay.h"
 #include <QVideoFrame>
 #include <QImage>
@@ -64,9 +65,9 @@ ScreenCaptureSession::ScreenCaptureSession(QObject *parent) : QObject(parent)
 
 bool ScreenCaptureSession::isActive() const { return m_wfActive || m_capture.isActive(); }
 
-void ScreenCaptureSession::setTargetFps(int fps) { fps = qBound(1, fps, 60); if (fps != m_targetFps) { m_targetFps = fps; emit targetFpsChanged(); if (m_wfActive && (m_video ? qAbs(fps - m_wfFps) >= 12 : fps > m_wfFps)) scheduleWfRestart(); } }
-void ScreenCaptureSession::setJpegQuality(int q) { q = qBound(10, q, 95); if (q != m_jpegQuality) { m_jpegQuality = q; emit jpegQualityChanged(); if (m_wfActive && !m_raw && qAbs(q - m_wfQuality) >= (m_video ? 10 : 5)) scheduleWfRestart(); } }
-void ScreenCaptureSession::setMaxWidth(int w) { w = qBound(320, w, 3840); if (w != m_maxWidth) { m_maxWidth = w; emit maxWidthChanged(); if (m_wfActive && qAbs(w - m_wfWidth) * 100 > m_wfWidth * 15) scheduleWfRestart(); } }
+void ScreenCaptureSession::setTargetFps(int fps) { fps = qBound(1, fps, 60); if (fps != m_targetFps) { m_targetFps = fps; emit targetFpsChanged(); if (m_wfActive && (m_video ? qAbs(fps - m_wfFps) >= 12 : fps > m_wfFps)) scheduleTuneRestart(); } }
+void ScreenCaptureSession::setJpegQuality(int q) { q = qBound(10, q, 95); if (q != m_jpegQuality) { m_jpegQuality = q; emit jpegQualityChanged(); if (m_wfActive && !m_raw && qAbs(q - m_wfQuality) >= (m_video ? 10 : 5)) scheduleTuneRestart(); } }
+void ScreenCaptureSession::setMaxWidth(int w) { w = qBound(320, w, 3840); if (w != m_maxWidth) { m_maxWidth = w; emit maxWidthChanged(); if (m_wfActive && qAbs(w - m_wfWidth) * 100 > m_wfWidth * 15) scheduleTuneRestart(); } }
 
 void ScreenCaptureSession::setRegion(const QRectF &r)
 {
@@ -119,8 +120,9 @@ void ScreenCaptureSession::setVideoMode(bool on)
 void ScreenCaptureSession::requestKeyFrame()
 {
     m_forceKey = true;
-    // у видео ключевой кадр идёт раз в секунду сам; если запрос пришёл сразу после него — ждём, иначе перезапуск кодера
-    if (m_video && m_wfActive && QDateTime::currentMSecsSinceEpoch() - m_lastKeyUnitMs > 1500) scheduleWfRestart(300);
+    // у видео ключевой кадр идёт раз в секунду сам — дождаться его быстрее, чем перезапускать кодер (0,3–0,8 с без кадров).
+    // Перезапуск — только если ключевых кадров нет дольше 3 секунд (кодер завис)
+    if (m_video && m_wfActive && QDateTime::currentMSecsSinceEpoch() - m_lastKeyUnitMs > 3000) scheduleWfRestart(300);
 }
 
 void ScreenCaptureSession::start()
@@ -158,11 +160,8 @@ namespace {
 // ответ hyprctl -j <what> одним разбором
 QJsonArray hyprctlJson(const char *what)
 {
-    QProcess p;
-    p.setStandardInputFile(QProcess::nullDevice());
-    p.start(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QString::fromLatin1(what)});
-    if (!p.waitForFinished(800)) { p.kill(); return {}; }
-    return QJsonDocument::fromJson(p.readAllStandardOutput()).array();
+    // сокет Hyprland: ~1 мс вместо процесса hyprctl — показ окна спрашивает его положение раз в 0,9 с на главном потоке
+    return QJsonDocument::fromJson(HyprIpc::request(QByteArray("j/") + what)).array();
 }
 
 bool windowRectOf(const QString &address, QRect *out)
@@ -248,6 +247,15 @@ void ScreenCaptureSession::checkWindow()
 
 void ScreenCaptureSession::scheduleWfRestart(int delayMs) { m_wfRestart.start(delayMs); }
 
+void ScreenCaptureSession::scheduleTuneRestart()
+{
+    constexpr qint64 WF_TUNE_GAP_MS = 6000;
+    // уже назначен более ранний перезапуск (увеличение, смена формата) — он применит и эти значения
+    if (m_wfRestart.isActive() && m_wfRestart.remainingTime() <= 1200) return;
+    const qint64 wait = m_wfStartedMs + WF_TUNE_GAP_MS - QDateTime::currentMSecsSinceEpoch();
+    scheduleWfRestart(int(qMax<qint64>(1200, wait)));
+}
+
 QScreen *ScreenCaptureSession::pickScreen() const
 {
     if (!m_screenName.isEmpty())
@@ -257,6 +265,7 @@ QScreen *ScreenCaptureSession::pickScreen() const
 
 void ScreenCaptureSession::startWf()
 {
+    m_wfStartedMs = QDateTime::currentMSecsSinceEpoch();
     const bool virt = virtualSource() && m_virtualSize.isValid();
     QScreen *scr = virt ? nullptr : pickScreen();
     if (!scr && !virt) { startQtCapture(); return; }
@@ -657,6 +666,7 @@ void ScreenCaptureSession::onWfFrame(const QByteArray &jpeg)
 #else
 bool ScreenCaptureSession::wfAvailable() const { return false; }
 void ScreenCaptureSession::scheduleWfRestart(int) {}
+void ScreenCaptureSession::scheduleTuneRestart() {}
 void ScreenCaptureSession::startWf() { startQtCapture(); }
 void ScreenCaptureSession::stopWf(bool) {}
 void ScreenCaptureSession::onWfData() {}

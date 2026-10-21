@@ -1,11 +1,11 @@
 #include "EdgeCrossing.h"
+#include "HyprIpc.h"
 #include "../core/PeerManager.h"
 #include "../core/TrustStore.h"
 
 #include <QDir>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLocalSocket>
 #include <QSocketNotifier>
 
 #ifdef ORBIT_DESKTOP_LINUX
@@ -87,18 +87,7 @@ bool EdgeCrossing::available()
 
 // ---------- Hyprland ----------
 
-QByteArray EdgeCrossing::hypr(const QByteArray &request)
-{
-    const QString path = qEnvironmentVariable("XDG_RUNTIME_DIR") + QStringLiteral("/hypr/") + qEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE") + QStringLiteral("/.socket.sock");
-    QLocalSocket s;
-    s.connectToServer(path);
-    if (!s.waitForConnected(200)) return {};
-    s.write(request);
-    s.waitForBytesWritten(200);
-    QByteArray out;
-    while (s.waitForReadyRead(300)) out += s.readAll();       // Hyprland закрывает соединение после ответа
-    return out;
-}
+QByteArray EdgeCrossing::hypr(const QByteArray &request) { return HyprIpc::request(request); }
 
 // монитор по имени или самый крайний со стороны side; координаты раскладки (логические, с учётом масштаба и поворота)
 QRectF EdgeCrossing::monitorAt(const QString &side, const QString &name, QString *outName)
@@ -134,14 +123,7 @@ static QPointF edgePoint(const QRectF &m, const QString &side, double pos, doubl
 static void warpTo(const QPointF &p)
 {
     // курсор переставляет композитор; варп сам по себе не событие ввода, поэтому окно под курсором узнает о нём при первом движении
-    const QByteArray cmd = QStringLiteral("dispatch hl.dsp.cursor.move({ x = %1, y = %2 })").arg(qRound(p.x())).arg(qRound(p.y())).toUtf8();
-    QLocalSocket s;
-    const QString path = qEnvironmentVariable("XDG_RUNTIME_DIR") + QStringLiteral("/hypr/") + qEnvironmentVariable("HYPRLAND_INSTANCE_SIGNATURE") + QStringLiteral("/.socket.sock");
-    s.connectToServer(path);
-    if (!s.waitForConnected(200)) return;
-    s.write(cmd);
-    s.waitForBytesWritten(200);
-    s.waitForReadyRead(200);
+    HyprIpc::request(QStringLiteral("dispatch hl.dsp.cursor.move({ x = %1, y = %2 })").arg(qRound(p.x())).arg(qRound(p.y())).toUtf8());
 }
 
 void EdgeCrossing::emitCrossing(const QString &dir, const QString &side, double pos, const QString &screen, const QString &peer)

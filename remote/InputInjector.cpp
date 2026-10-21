@@ -1,4 +1,5 @@
 #include "InputInjector.h"
+#include "HyprIpc.h"
 
 #ifdef ORBIT_DESKTOP_LINUX
 #include <fcntl.h>
@@ -240,10 +241,9 @@ bool InputInjector::warpCursorHyprland(double nx, double ny)
     qint64 &askedAt = m_geomAt;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (w <= 0 || now - askedAt > 10000) {
-        QProcess probe;
-        probe.start(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("monitors")});
-        if (!probe.waitForFinished(1500)) return false;
-        const QJsonArray mons = QJsonDocument::fromJson(probe.readAllStandardOutput()).array();
+        // сокет Hyprland, а не процесс hyprctl: запрос ~1 мс и без ожидания до полутора секунд на главном потоке
+        const QJsonArray mons = QJsonDocument::fromJson(HyprIpc::request("j/monitors")).array();
+        if (mons.isEmpty()) return false;
         QJsonObject pick;
         for (const QJsonValue &v : mons) {                       // нужный монитор («второй экран») по имени, иначе с фокусом, иначе первый
             const QJsonObject o = v.toObject();
@@ -264,12 +264,8 @@ bool InputInjector::warpCursorHyprland(double nx, double ny)
     if (!m_targetOutput.isEmpty()) {
         // касания второго экрана уводят системный курсор на виртуальный монитор; запоминается прежнее место, чтобы вернуть его после касаний
         if (!m_haveBack) {
-            QProcess pos;
-            pos.start(QStringLiteral("hyprctl"), {QStringLiteral("cursorpos")});
-            if (pos.waitForFinished(800)) {
-                const QStringList xy = QString::fromUtf8(pos.readAllStandardOutput()).trimmed().split(QLatin1Char(','));
-                if (xy.size() == 2) { m_backX = xy[0].trimmed().toInt(); m_backY = xy[1].trimmed().toInt(); m_haveBack = true; }
-            }
+            const QJsonObject c = QJsonDocument::fromJson(HyprIpc::request("j/cursorpos")).object();
+            if (c.contains(QStringLiteral("x"))) { m_backX = c.value(QStringLiteral("x")).toInt(); m_backY = c.value(QStringLiteral("y")).toInt(); m_haveBack = true; }
         }
         if (m_backT.interval() != 900) {
             m_backT.setSingleShot(true); m_backT.setInterval(900);
@@ -277,8 +273,8 @@ bool InputInjector::warpCursorHyprland(double nx, double ny)
         }
         m_backT.start();
     }
-    QProcess::startDetached(QStringLiteral("hyprctl"), {QStringLiteral("dispatch"),
-        QStringLiteral("hl.dsp.cursor.move({ x = %1, y = %2 })").arg(x).arg(y)});
+    // раньше — отдельный процесс hyprctl на каждое движение (до 30 в секунду): fork и запуск отнимали процессор у захвата и кодера
+    HyprIpc::request(QStringLiteral("dispatch hl.dsp.cursor.move({ x = %1, y = %2 })").arg(x).arg(y).toUtf8());
     return true;
 #else
     Q_UNUSED(nx); Q_UNUSED(ny);
@@ -293,8 +289,7 @@ void InputInjector::restoreCursor()
     m_backT.stop();
     if (!m_haveBack) return;
     m_haveBack = false;
-    QProcess::startDetached(QStringLiteral("hyprctl"), {QStringLiteral("dispatch"),
-        QStringLiteral("hl.dsp.cursor.move({ x = %1, y = %2 })").arg(m_backX).arg(m_backY)});
+    HyprIpc::request(QStringLiteral("dispatch hl.dsp.cursor.move({ x = %1, y = %2 })").arg(m_backX).arg(m_backY).toUtf8());
 #endif
 }
 
@@ -323,15 +318,11 @@ void InputInjector::mouseButton(const QString &button, bool down)
 
 void InputInjector::click(const QString &button, int count)
 {
-    for (int i = 0; i < qBound(1, count, 3); ++i) {
-        mouseButton(button, true);
-#ifdef ORBIT_DESKTOP_LINUX
-        QThread::usleep(12000);
-#endif
-        mouseButton(button, false);
-#ifdef ORBIT_DESKTOP_LINUX
-        QThread::usleep(20000);
-#endif
+    // нажатие и отпускание — по таймеру, а не сном главного потока: раньше каждый щелчок останавливал показ на 32 мс
+    count = qBound(1, count, 3);
+    for (int i = 0; i < count; ++i) {
+        QTimer::singleShot(i * 32, this, [this, button]() { mouseButton(button, true); });
+        QTimer::singleShot(i * 32 + 12, this, [this, button]() { mouseButton(button, false); });
     }
 }
 
