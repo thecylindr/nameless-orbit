@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(nameless-orbit VERSION 0.2.2 LANGUAGES CXX)
+project(nameless-orbit VERSION 0.2.3 LANGUAGES CXX)
 add_compile_definitions(APP_VERSION_STR="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -57,6 +57,7 @@ qt_add_executable(nameless-orbit
     remote/FrameView.cpp
     remote/FrameView.h
     remote/InputInjector.cpp
+    remote/EdgeCrossing.cpp
     remote/RemoteDesktopController.cpp
     remote/VideoDecoder.cpp
     remote/AudioStream.cpp
@@ -129,7 +130,7 @@ endif()
 
 # Android: свой манифест (разрешения для сети, вибрации, уведомлений) на основе шаблона Qt
 if(ANDROID)
-    # код версии растёт вместе с версией проекта (0.2.2 → 202): Android ставит новый APK поверх старого только при большем коде
+    # код версии растёт вместе с версией проекта (0.2.3 → 203): Android ставит новый APK поверх старого только при большем коде
     math(EXPR ORBIT_VERSION_CODE "${PROJECT_VERSION_MAJOR} * 10000 + ${PROJECT_VERSION_MINOR} * 100 + ${PROJECT_VERSION_PATCH}")
     set_target_properties(nameless-orbit PROPERTIES
         QT_ANDROID_VERSION_NAME ${PROJECT_VERSION}

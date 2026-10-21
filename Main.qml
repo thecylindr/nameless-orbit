@@ -84,6 +84,8 @@ ApplicationWindow {
     // иначе страница списка закрывала бы просмотр сразу после начала (см. onCurrentItemChanged у stack)
     function showScreen(id) {
         if (screenWin.visible) return;
+        // второй экран на компьютере — отдельное окно на весь экран: главное окно остаётся как было и не теряет полный экран при выводе вперёд
+        if (!IsMobile && RemoteDesktop.secondScreen) { detachScreen(id); screenWin.visibility = Window.FullScreen; return; }
         if (stack.currentItem && stack.currentItem.isScreen === true) return;
         stack.push(screenPage, { deviceId: id });
     }

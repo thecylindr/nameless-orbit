@@ -45,7 +45,8 @@ class RemoteDesktopController : public PluginBase
     Q_PROPERTY(bool sharingActive READ sharingActive NOTIFY sharingChanged)
     Q_PROPERTY(QVariantMap shareInfo READ shareInfo NOTIFY sharingChanged)                    // кому и что показывается: peer, what, second, waiting (ждём разрешения системы) — для информационной полосы
     Q_PROPERTY(QString viewingDeviceId READ viewingDeviceId NOTIFY viewingChanged)
-    Q_PROPERTY(int viewStage READ viewStage NOTIFY viewingChanged)                             // 0 — запрос отправлен, 1 — владелец согласился (ждём начала захвата), кадры идут — смотрите frameSeq
+    Q_PROPERTY(int viewStage READ viewStage NOTIFY viewingChanged)
+    Q_PROPERTY(QString viewNote READ viewNote NOTIFY viewingChanged)                           // что сейчас делает показывающий: «создаю монитор», «ждём выбора экрана»…                             // 0 — запрос отправлен, 1 — владелец согласился (ждём начала захвата), кадры идут — смотрите frameSeq
     Q_PROPERTY(int frameSeq READ frameSeq NOTIFY frameUpdated)
     Q_PROPERTY(int frameWidth READ frameWidth NOTIFY frameUpdated)
     Q_PROPERTY(int frameHeight READ frameHeight NOTIFY frameUpdated)
@@ -98,6 +99,7 @@ public:
     bool sharingActive() const { return !m_sharingTo.isEmpty() && (m_capture.isActive() || m_externalActive); }     // «показ идёт» — только когда есть кому показывать
     QString viewingDeviceId() const { return m_viewing; }
     int viewStage() const { return m_viewStage; }
+    QString viewNote() const { return m_viewNote; }
     int frameSeq() const { return m_frameSeq; }
     int frameWidth() const { return m_frameW; }
     int frameHeight() const { return m_frameH; }
@@ -226,6 +228,8 @@ private slots:
 
 private:
     void sendToPeer(const QString &deviceId, const QJsonObject &payload);
+    void sendStatus(const QString &deviceId, const QString &text);    // зрителю: ход запуска показа
+    void endViewing();                                                // просмотр закрыт другой стороной (без ответа ей)
     void stopInputSession();
     void sendFrame(const QVector<FramePart> &parts, int width, int height, bool key);     // обновление экрана зрителю
     // ---- приём обновлений: разжатие и сборка картинки идут в рабочем потоке, интерфейс получает только готовый результат ----
@@ -255,6 +259,8 @@ private:
     QHash<QString, SecondSpec> m_ssPending;           // запросы второго экрана, ждущие ответа хозяина
     int m_viewStage = 0;
     int m_viewGen = 0;
+    int m_shareGen = 0;                               // номер запуска показа: сторож первого кадра относится только к своему
+    QString m_viewNote;                               // зритель: последнее сообщение о ходе запуска от показывающего
     AudioStream m_audioOut;                           // показывающий: звук этого компьютера — в сеть
     AudioStream m_audioIn;                            // зритель: звук показывающего — в динамики
     QString m_audioState, m_audioCodecIn;             // состояние приёма звука

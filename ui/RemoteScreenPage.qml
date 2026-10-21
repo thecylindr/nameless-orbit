@@ -92,15 +92,56 @@ Page {
         }
     }
 
-    // ждём согласия на другой стороне
-    Text {
-        visible: RemoteDesktop.frameSeq === 0
+    // ждём согласия и первых кадров: карточка с ходом запуска (сообщения показывающего), временем ожидания и отменой.
+    // Раньше здесь была одна строка серого текста — во втором экране на весь экран оставался пустой тёмный прямоугольник
+    property int waitSec: 0
+    Timer { interval: 1000; repeat: true; running: RemoteDesktop.frameSeq === 0 && RemoteDesktop.viewingDeviceId !== ""; onRunningChanged: if (running) page.waitSec = 0; onTriggered: page.waitSec++ }
+    Rectangle {
+        visible: RemoteDesktop.frameSeq === 0 && !page.pip
+        z: 20
         anchors.centerIn: parent
-        width: parent.width - 64; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
-        text: RemoteDesktop.viewingDeviceId === "" ? qsTr("Демонстрация не идёт")
-              : (RemoteDesktop.viewStage >= 1 ? qsTr("Разрешение получено. Ждём начала показа: на том устройстве может появиться системное окно захвата экрана — подтвердите его")
-                                              : qsTr("Запрос отправлен. Ждём, пока владелец экрана разрешит показ…"))
-        color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 14
+        width: Math.min(440, parent.width - 32)
+        height: waitCol.implicitHeight + 40
+        radius: Theme.radius
+        color: Theme.surfaceHigh
+        border.width: 1; border.color: Qt.rgba(1, 1, 1, 0.08)
+        Column {
+            id: waitCol
+            x: 20; y: 20
+            width: parent.width - 40
+            spacing: 12
+            Common.Icon {
+                anchors.horizontalCenter: parent.horizontalCenter
+                name: "refresh"; size: 30; color: Theme.accent
+                visible: RemoteDesktop.viewingDeviceId !== ""
+                RotationAnimation on rotation { running: parent.visible; loops: Animation.Infinite; from: 0; to: 360; duration: 1100 }
+            }
+            Text {
+                width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                text: RemoteDesktop.viewingDeviceId === "" ? qsTr("Демонстрация не идёт")
+                      : (page.second ? qsTr("Подключаем второй экран") : (RemoteDesktop.viewStage >= 1 ? qsTr("Показ разрешён") : qsTr("Запрос отправлен")))
+                color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 17; font.weight: Font.DemiBold
+            }
+            Text {
+                visible: RemoteDesktop.viewingDeviceId !== ""
+                width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap
+                text: RemoteDesktop.viewNote !== "" ? RemoteDesktop.viewNote
+                      : (RemoteDesktop.viewStage >= 1 ? qsTr("Ждём первые кадры. На том устройстве может появиться системное окно захвата экрана — подтвердите его")
+                                                      : qsTr("Ждём, пока владелец экрана разрешит показ…"))
+                color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 13
+            }
+            Text {
+                visible: RemoteDesktop.viewingDeviceId !== "" && page.waitSec >= 3
+                width: parent.width; horizontalAlignment: Text.AlignHCenter
+                text: qsTr("Ожидание: ") + page.waitSec + qsTr(" с")
+                color: page.waitSec > 20 ? Theme.warn : Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 11
+            }
+            Common.GlassButton {
+                anchors.horizontalCenter: parent.horizontalCenter
+                icon: "close"; text: RemoteDesktop.viewingDeviceId === "" ? qsTr("Закрыть") : qsTr("Отменить")
+                onClicked: page.back()
+            }
+        }
     }
 
     // ---- окно просмотра ----

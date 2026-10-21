@@ -1,7 +1,7 @@
 // NameLess Orbit — связь между своими устройствами в локальной сети: обнаружение, сопряжение, буфер обмена,
 // уведомления, батарея, медиа, команды, демонстрация и управление экраном. Подробно — в README.md.
 #ifndef APP_VERSION_STR
-#define APP_VERSION_STR "0.2.2"
+#define APP_VERSION_STR "0.2.3"
 #endif
 
 #include <QGuiApplication>
@@ -28,6 +28,7 @@
 #include "plugins/NotificationsPlugin.h"
 #include "plugins/SharePlugin.h"
 #include "remote/RemoteDesktopController.h"
+#include "remote/EdgeCrossing.h"
 #include "remote/VirtualDisplay.h"
 #include "remote/FrameView.h"
 #include <QtQml/qqml.h>
@@ -170,6 +171,11 @@ int main(int argc, char *argv[])
     // объекты контекста (иначе в логе TypeError: Cannot read property ... of null)
     RemoteDesktopController remoteDesktop(&peerManager, &settings, nullptr);
     peerManager.registerPlugin(remoteDesktop.name(), &remoteDesktop);
+    // переход курсора между компьютерами: край ловит NameLess UI, команда приходит по D-Bus
+    EdgeCrossing edgeCrossing(&peerManager);
+    peerManager.registerPlugin(edgeCrossing.name(), &edgeCrossing);
+    orbitDBus.setCrossing(&edgeCrossing);
+    QObject::connect(&edgeCrossing, &EdgeCrossing::errorOccurred, &app, [](const QString &m) { PlatformBridge::postNotification(QStringLiteral("Переход курсора"), m); });
 
     // экран показывающего устройства рисуется своим элементом сцены (см. remote/FrameView.h); регистрируется вручную в модуле
     // приложения — QML-файлы модуля видят его без отдельного import
@@ -227,6 +233,7 @@ int main(int argc, char *argv[])
     const auto bringToFront = [&engine]() {
         if (auto *w = qobject_cast<QWindow *>(engine.rootObjects().first())) {
             if (w->isVisible() && w->windowStates() != Qt::WindowMinimized) return;
+            if (w->windowStates() & Qt::WindowFullScreen) { w->show(); w->raise(); w->requestActivate(); return; }     // полный экран просмотра не сбрасывается
             w->setWindowStates(Qt::WindowNoState);
             w->show(); w->raise(); w->requestActivate();
         }
@@ -257,7 +264,8 @@ int main(int argc, char *argv[])
     QObject::connect(&orbitDBus, &OrbitDBus::quitRequested, &app, &QCoreApplication::quit);
     QObject::connect(&orbitDBus, &OrbitDBus::showRequested, &app, [&engine]() {
         if (auto *w = qobject_cast<QWindow *>(engine.rootObjects().first())) {
-            w->setWindowStates(Qt::WindowNoState);
+            // раньше «Показать» сразу после запроса второго экрана снимало с окна полный экран — оставалось маленькое пустое окно
+            if (!(w->windowStates() & Qt::WindowFullScreen)) w->setWindowStates(Qt::WindowNoState);
             w->show(); w->raise(); w->requestActivate();
         }
     });

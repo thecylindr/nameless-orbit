@@ -332,5 +332,11 @@
  "Можно изменить позже в настройках": "You can change this later in settings",
  "Русский": "Русский",
  "English": "English",
-  "«Стать его вторым монитором»: у другого устройства не нашлось Hyprland или driftwm (или у него старая версия Orbit, ниже 0.2.2). Второй монитор можно создать только на компьютере с Hyprland; обратное направление — кнопка «Сделать его вторым монитором».": "“Become its second monitor”: the other device has no Hyprland or driftwm (or it runs an older Orbit, below 0.2.2). A second monitor can only be created on a computer running Hyprland; for the opposite direction use “Make it a second monitor”."
+ "«Стать его вторым монитором»: у другого устройства не нашлось Hyprland или driftwm (или у него старая версия Orbit, ниже 0.2.2). Второй монитор можно создать только на компьютере с Hyprland; обратное направление — кнопка «Сделать его вторым монитором».": "“Become its second monitor”: the other device has no Hyprland or driftwm (or it runs an older Orbit, below 0.2.2). A second monitor can only be created on a computer running Hyprland; for the opposite direction use “Make it a second monitor”.",
+ "Подключаем второй экран": "Connecting second screen",
+ "Показ разрешён": "Sharing allowed",
+ "Запрос отправлен": "Request sent",
+ "Ждём первые кадры. На том устройстве может появиться системное окно захвата экрана — подтвердите его": "Waiting for the first frames. A system screen-capture dialog may appear on that device — confirm it",
+ "Ждём, пока владелец экрана разрешит показ…": "Waiting for the screen owner to allow sharing…",
+ "Ожидание: ": "Waiting: "
 }

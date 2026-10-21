@@ -7,6 +7,7 @@
 #include "../plugins/NotificationsPlugin.h"
 #include "../plugins/SharePlugin.h"
 #include "../plugins/RunCommandPlugin.h"
+#include "../remote/EdgeCrossing.h"
 
 #ifdef ORBIT_DESKTOP_LINUX
 #include <QDBusConnection>
@@ -85,8 +86,23 @@ QByteArray OrbitDBus::statusJson() const
     o[QStringLiteral("connected")] = connected;
     o[QStringLiteral("pairingRequests")] = QJsonArray::fromVariantList(m_pm->pairingRequestsForQml());
     o[QStringLiteral("transfers")] = QJsonArray::fromVariantList(m_share->transfers());
+    o[QStringLiteral("crossing")] = m_crossing ? m_crossing->activeDeviceId() : QString();      // с кем сейчас общий курсор
     return QJsonDocument(o).toJson(QJsonDocument::Compact);
 }
+
+void OrbitDBus::setCrossing(EdgeCrossing *crossing)
+{
+    m_crossing = crossing;
+    connect(crossing, &EdgeCrossing::crossing, this, &OrbitDBus::Crossing);
+    connect(crossing, &EdgeCrossing::activeChanged, this, &OrbitDBus::notifyChanged);
+}
+
+bool OrbitDBus::CrossTo(const QString &deviceId, const QString &side, double pos, const QString &screen)
+{
+    return m_crossing && m_crossing->crossTo(deviceId, side, pos, screen);
+}
+
+void OrbitDBus::CrossStop() { if (m_crossing) m_crossing->stop(); }
 
 void OrbitDBus::Scan() { m_pm->refresh(); }
 void OrbitDBus::SetDiscovery(bool on) { m_pm->setDiscoveryActive(on); }

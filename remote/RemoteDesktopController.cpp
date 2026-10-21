@@ -182,10 +182,7 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
     connect(&m_graceTimer, &QTimer::timeout, this, [this]() { m_graceFor.clear(); stopSharing(); });
     m_reconnectTimeout.setSingleShot(true);
     m_reconnectTimeout.setInterval(RECONNECT_TIMEOUT_MS);
-    connect(&m_reconnectTimeout, &QTimer::timeout, this, [this]() {
-        m_reconnecting = false; m_viewing.clear(); m_frameSeq = 0; clearCanvas();
-        emit viewingChanged(); emit frameUpdated(); updateBackgroundHold();
-    });
+    connect(&m_reconnectTimeout, &QTimer::timeout, this, [this]() { endViewing(); });      // и второй экран тоже: раньше флаг оставался включённым
 
     connect(manager, &PeerManager::deviceDisconnected, this, [this](const QString &deviceId) {
         if (m_sharingTo == deviceId) {
@@ -444,13 +441,35 @@ void RemoteDesktopController::sendToPeer(const QString &deviceId, const QJsonObj
     m_manager->sendPlugin(deviceId, name(), payload);
 }
 
+void RemoteDesktopController::sendStatus(const QString &deviceId, const QString &text)
+{
+    QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareStatus"); p[QStringLiteral("text")] = text;
+    sendToPeer(deviceId, p);
+}
+
+// просмотр закончился по решению другой стороны (отказ, ошибка, остановка): без ответного сообщения ей
+void RemoteDesktopController::endViewing()
+{
+    if (m_viewing.isEmpty()) return;
+    m_viewing.clear(); m_viewNote.clear();
+    m_reconnecting = false; m_reconnectTimeout.stop();
+    m_frameSeq = 0;
+    if (m_audioWant) { m_audioWant = false; m_audioIn.stopPlayback(); m_audioState.clear(); emit audioStateChanged(); }
+    if (m_secondViewing) { m_secondViewing = false; emit secondScreenChanged(); }
+    clearCanvas();
+    emit viewingChanged(); emit frameUpdated();
+    updateBackgroundHold();
+}
+
 // ---------- просмотр чужого экрана ----------
 
 void RemoteDesktopController::requestShare(const QString &deviceId)
 {
     m_audioOverride = QStringLiteral("auto"); m_audioCodecPref.clear();      // выбор звука из окна второго экрана относится только к нему
-    // смотреть чужой экран можно всегда (в том числе с телефона, где главный выключатель скрыт): решает тот, чей это экран
-    if (!m_viewing.isEmpty()) return;
+    // смотреть чужой экран можно всегда (в том числе с телефона, где главный выключатель скрыт): решает тот, чей это экран.
+    // Уже смотрим этот же экран — ничего не делаем; другой экран или второй экран — переключаемся, а не молчим
+    if (m_viewing == deviceId && !m_secondViewing) return;
+    if (!m_viewing.isEmpty()) stopViewing();
     QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareRequest"); p[QStringLiteral("vw")] = myScreenLongSide(); p[QStringLiteral("h264")] = canDecodeH264(); p[QStringLiteral("tiles")] = true;
     sendToPeer(deviceId, p);
     beginViewing(deviceId);
@@ -460,6 +479,7 @@ void RemoteDesktopController::beginViewing(const QString &deviceId)
 {
     m_viewing = deviceId;    // UI сразу показывает «ожидание ответа…»; кадры придут, когда другая сторона согласится
     m_viewStage = 0;
+    m_viewNote.clear();
     ScreenCaptureSession::log(QStringLiteral("Смотрим экран устройства %1: запрос отправлен").arg(who(deviceId)));
     m_reconnecting = false;
     m_controlState = 0;
@@ -482,7 +502,8 @@ void RemoteDesktopController::beginViewing(const QString &deviceId)
 
 void RemoteDesktopController::requestSecondScreen(const QString &deviceId, const QVariantMap &spec)
 {
-    if (!m_viewing.isEmpty()) return;
+    if (m_viewing == deviceId && m_secondViewing) return;
+    if (!m_viewing.isEmpty()) stopViewing();          // идёт обычный просмотр — второй экран его заменяет
     // размер экрана этого устройства (физические пиксели) → размер второго экрана: ориентация, разрешение, предел 2560×1600 с сохранением пропорций
     const QScreen *sc = QGuiApplication::primaryScreen();
     QSize px = sc ? sc->size() * sc->devicePixelRatio() : QSize(1920, 1080);
@@ -542,7 +563,7 @@ void RemoteDesktopController::offerSecondScreen(const QString &deviceId, const Q
 
 void RemoteDesktopController::acceptSecondScreenOffer(const QString &deviceId)
 {
-    if (!m_ssOfferSpec.contains(deviceId) || !m_viewing.isEmpty()) return;
+    if (!m_ssOfferSpec.contains(deviceId)) return;
     requestSecondScreen(deviceId, m_ssOfferSpec.take(deviceId));
 }
 
@@ -632,9 +653,10 @@ void RemoteDesktopController::offerShare(const QString &deviceId, const QString 
 void RemoteDesktopController::stopViewing()
 {
     if (m_viewing.isEmpty()) return;
-    QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareStop");
+    QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareStop"); p[QStringLiteral("by")] = QStringLiteral("viewer");
     sendToPeer(m_viewing, p);
     m_viewing.clear();
+    m_viewNote.clear();
     m_reconnecting = false;
     m_reconnectTimeout.stop();
     m_frameSeq = 0;
@@ -719,11 +741,31 @@ void RemoteDesktopController::acceptShareRequest(const QString &deviceId, const 
     applyLevel();
     QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareAccepted");
     sendToPeer(deviceId, p);
+    // системное окно выбора появляется только у портала и на телефоне; монитор, окно Hyprland и второй экран снимаются сразу
+    const bool portal = screenName == QLatin1String("portal");
 #ifdef Q_OS_ANDROID
+    sendStatus(deviceId, QStringLiteral("На телефоне появится системное окно «Начать трансляцию» — подтвердите его"));
     AndroidCapture::request();      // системное окно «Начать демонстрацию экрана» — второе согласие
+    const int firstFrameSec = 120;
 #else
+    sendStatus(deviceId, portal ? QStringLiteral("На компьютере открыто системное окно выбора экрана — выберите, что показать")
+                                : (m_ssFps > 0 ? QStringLiteral("Монитор создан, запускаю захват…") : QStringLiteral("Запускаю захват экрана…")));
     m_capture.start();   // здесь показывается системный выбор экрана (xdg-desktop-portal) — второе согласие
+    const int firstFrameSec = portal ? 120 : 15;
 #endif
+    // сторож первого кадра: захват молча не дал ни одного кадра (wf-recorder не запустился на мониторе, видеокарта, портал закрыт) —
+    // зритель получает причину сразу, а не висит с пустым экраном, а виртуальный монитор убирается
+    const int gen = ++m_shareGen;
+    QTimer::singleShot(firstFrameSec * 1000, this, [this, deviceId, gen]() {
+        if (gen != m_shareGen || m_sharingTo != deviceId || m_sendSeq > 0) return;
+        const QString why = m_capture.errorString().isEmpty() ? QStringLiteral("захват экрана не дал ни одного кадра — проверьте wf-recorder и видеодрайвер (журнал orbit-video.log)")
+                                                              : m_capture.errorString();
+        ScreenCaptureSession::log(QStringLiteral("Показ для %1: первого кадра нет — %2").arg(who(deviceId), why));
+        QJsonObject e; e[QStringLiteral("kind")] = QStringLiteral("shareError"); e[QStringLiteral("message")] = why;
+        sendToPeer(deviceId, e);
+        stopSharing();
+        emit errorOccurred(QStringLiteral("Показ не начался: ") + why);
+    });
     emit sharingChanged();
     updateBackgroundHold();
 }
@@ -783,7 +825,7 @@ void RemoteDesktopController::stopSharing()
     emit sharingChanged();
 #endif
     if (m_sharingTo.isEmpty()) return;
-    QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareStop");
+    QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareStop"); p[QStringLiteral("by")] = QStringLiteral("sharer");
     sendToPeer(m_sharingTo, p);
     if (m_inputArmedFor == m_sharingTo) stopInputSession();
     m_sharingTo.clear();
@@ -1060,7 +1102,16 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
         return;
     }
     if (kind == QLatin1String("shareError")) {
-        if (m_viewing == deviceId) emit errorOccurred(payload.value(QStringLiteral("message")).toString());
+        if (m_viewing != deviceId) return;
+        const QString msg = payload.value(QStringLiteral("message")).toString();
+        ScreenCaptureSession::log(QStringLiteral("%1: показ не начался — %2").arg(who(deviceId), msg));
+        endViewing();
+        emit errorOccurred(QStringLiteral("Показ не начался: ") + msg);
+        return;
+    }
+    // ход запуска показа у хозяина («создаю монитор», «ждём выбора экрана»): зритель видит, что происходит, а не пустое окно
+    if (kind == QLatin1String("shareStatus")) {
+        if (m_viewing == deviceId) { m_viewNote = payload.value(QStringLiteral("text")).toString().left(160); emit viewingChanged(); }
         return;
     }
     if (kind == QLatin1String("secondScreenRequest")) {
@@ -1098,7 +1149,7 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
         QVariantMap spec;
         for (const char *k : {"orientation", "res", "side", "scale", "mode", "workspace", "audio", "acodec"}) spec[QString::fromLatin1(k)] = payload.value(QString::fromLatin1(k)).toString();
         spec[QStringLiteral("fps")] = payload.value(QStringLiteral("fps")).toInt(60);
-        if (!m_viewing.isEmpty()) { declineSecondScreenOffer(deviceId); return; }                 // уже смотрим другое
+        if (!m_viewing.isEmpty() && m_viewing != deviceId) { declineSecondScreenOffer(deviceId); return; }      // уже смотрим другое устройство; это же — переключаемся на второй экран
         m_ssOfferSpec.insert(deviceId, spec);
         static const QHash<QString, QString> sides{{QStringLiteral("left"), QStringLiteral("слева")}, {QStringLiteral("right"), QStringLiteral("справа")},
                                                    {QStringLiteral("top"), QStringLiteral("сверху")}, {QStringLiteral("bottom"), QStringLiteral("снизу")}};
@@ -1114,9 +1165,7 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
             return;
         }
         if (m_viewing != deviceId) return;
-        m_viewing.clear(); m_secondViewing = false; m_frameSeq = 0;
-        clearCanvas();
-        emit viewingChanged(); emit frameUpdated(); emit secondScreenChanged(); updateBackgroundHold();
+        endViewing();
         emit errorOccurred(QStringLiteral("Второй экран не включён: ") + payload.value(QStringLiteral("reason")).toString());
         return;
     }
@@ -1175,11 +1224,7 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
     if (kind == QLatin1String("permissionDenied")) {
         // другая сторона не разрешила этому устройству показ экрана: в её настройках «Что разрешено этому устройству» выключена «Демонстрация экрана»
         ScreenCaptureSession::log(QStringLiteral("%1 не разрешил запрос «%2» — нужно включить разрешение на его странице устройства").arg(who(deviceId), payload.value(QStringLiteral("of")).toString()));
-        if (m_viewing == deviceId) {
-            m_viewing.clear(); m_frameSeq = 0; m_reconnecting = false; m_reconnectTimeout.stop();
-            if (m_secondViewing) { m_secondViewing = false; emit secondScreenChanged(); }
-            emit viewingChanged(); emit frameUpdated(); updateBackgroundHold();
-        }
+        if (m_viewing == deviceId) endViewing();
         m_ssOffered.remove(deviceId);
         emit errorOccurred(QStringLiteral("Устройство не разрешило показ экрана. Откройте на нём это устройство и включите «Демонстрация экрана» в блоке «Что разрешено этому устройству у вас»"));
         return;
@@ -1194,12 +1239,14 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
         return;
     }
     if (kind == QLatin1String("shareDeclined")) {
-        if (m_viewing == deviceId) { m_viewing.clear(); emit viewingChanged(); emit shareDeclinedByPeer(deviceId); }
+        if (m_viewing == deviceId) { endViewing(); emit shareDeclinedByPeer(deviceId); }
         return;
     }
     if (kind == QLatin1String("shareStop")) {
-        if (m_viewing == deviceId) { m_viewing.clear(); m_reconnecting = false; m_reconnectTimeout.stop(); m_frameSeq = 0; if (m_secondViewing) { m_secondViewing = false; emit secondScreenChanged(); } emit viewingChanged(); emit frameUpdated(); updateBackgroundHold(); }
-        if (m_sharingTo == deviceId) stopSharing();   // смотрящий отключился — демонстрация теряет смысл
+        // by: viewer — он перестал смотреть мой экран, sharer — он перестал показывать свой; без поля (старая версия) — оба направления
+        const QString by = payload.value(QStringLiteral("by")).toString();
+        if (m_viewing == deviceId && by != QLatin1String("viewer")) endViewing();
+        if (m_sharingTo == deviceId && by != QLatin1String("sharer")) stopSharing();   // смотрящий отключился — демонстрация теряет смысл
         return;
     }
     if (kind == QLatin1String("frame")) {

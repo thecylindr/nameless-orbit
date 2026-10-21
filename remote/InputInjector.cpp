@@ -85,7 +85,8 @@ bool InputInjector::openDevice()
     ioctl(fd, UI_SET_EVBIT, EV_SYN);
     for (int code : keyMap().values()) ioctl(fd, UI_SET_KEYBIT, code);
     for (int code : modMap().values()) ioctl(fd, UI_SET_KEYBIT, code);
-    for (int code : {BTN_LEFT, BTN_RIGHT, BTN_MIDDLE}) ioctl(fd, UI_SET_KEYBIT, code);
+    for (int code : {BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA}) ioctl(fd, UI_SET_KEYBIT, code);
+    for (int code = KEY_ESC; code <= KEY_MICMUTE; ++code) ioctl(fd, UI_SET_KEYBIT, code);     // вся клавиатура: переход курсора передаёт коды клавиш как есть
     for (int code : {REL_X, REL_Y, REL_WHEEL, REL_HWHEEL}) ioctl(fd, UI_SET_RELBIT, code);
 
     uinput_setup setup{};
@@ -142,6 +143,19 @@ void InputInjector::syn()
     emitEvent(EV_SYN, SYN_REPORT, 0);
 #endif
 }
+
+void InputInjector::rawEvent(quint16 type, quint16 code, qint32 value)
+{
+#ifdef ORBIT_DESKTOP_LINUX
+    if (type != EV_KEY && type != EV_REL) return;                     // только клавиши, кнопки и смещения: остальное устройство не объявляло
+    if (type == EV_REL && code != REL_X && code != REL_Y && code != REL_WHEEL && code != REL_HWHEEL) return;
+    emitEvent(type, code, value);
+#else
+    Q_UNUSED(type); Q_UNUSED(code); Q_UNUSED(value);
+#endif
+}
+
+void InputInjector::rawSync() { syn(); }
 
 void InputInjector::moveRelative(int dx, int dy)
 {
