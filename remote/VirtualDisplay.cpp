@@ -165,12 +165,29 @@ bool create(const Spec &spec, QString *outName, QString *error)
         }
         if (free) pos = QStringLiteral("%1x%2").arg(cand.x()).arg(cand.y());
     }
-    // рабочий стол нового монитора назначается заранее: иначе Hyprland отдаёт ему первый свободный номер, и переключение на этот номер (Super+цифра)
-    // уводило курсор и фокус на виртуальный монитор. Отдельный «orbit» с номерами 1–10 не пересекается
+    // Куда вернуть пользователя после создания: Hyprland отдаёт новому выходу фокус, курсор и рабочий стол с номером «ID+1» (чаще всего 2) вместе с окнами —
+    // у пользователя на глазах экран «перекидывало». Правило hl.workspace_rule для этого не годится: через eval оно не снимается и копится,
+    // каждый выбранный раньше стол потом снова притягивался к виртуальному монитору (баг «уезжают все окна, кроме первого стола»).
+    QString homeMon = main.value(QStringLiteral("name")).toString();
+    int homeWs = 0;
+    for (const QJsonValue &v : hyprMonitors()) {
+        const QJsonObject m = v.toObject();
+        if (m.value(QStringLiteral("focused")).toBool() && !m.value(QStringLiteral("name")).toString().startsWith(QLatin1String("HEADLESS"))) {
+            homeMon = m.value(QStringLiteral("name")).toString();
+            homeWs = m.value(QStringLiteral("activeWorkspace")).toObject().value(QStringLiteral("id")).toInt();
+        }
+    }
+    QPoint homeCursor(-1, -1);
+    {
+        QByteArray co;
+        if (run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("cursorpos")}, &co)) {
+            const QJsonObject c = QJsonDocument::fromJson(co).object();
+            homeCursor = QPoint(c.value(QStringLiteral("x")).toInt(), c.value(QStringLiteral("y")).toInt());
+        }
+    }
     bool wsNum = false;
     const int wsId = spec.workspace.toInt(&wsNum);
-    const QString ws = (wsNum && wsId >= 1 && wsId <= 99) ? QString::number(wsId) : QStringLiteral("name:orbit");
-    run(QStringLiteral("hyprctl"), {QStringLiteral("eval"), QStringLiteral("hl.workspace_rule({ workspace = \"%1\", monitor = \"%2\", default = true })").arg(ws, name)});
+    const bool numberedWs = wsNum && wsId >= 1 && wsId <= 99;
     const QString lua = QStringLiteral("hl.monitor({ output = \"%1\", mode = \"%2x%3@%4\", position = \"%5\", scale = %6 })").arg(name).arg(W).arg(H).arg(F).arg(pos, QString::number(useScale, 'f', 2));
     if (!run(QStringLiteral("hyprctl"), {QStringLiteral("eval"), lua})) { if (error) *error = QStringLiteral("не удалось настроить виртуальный монитор"); return false; }
     if (!run(QStringLiteral("hyprctl"), {QStringLiteral("output"), QStringLiteral("create"), QStringLiteral("headless"), name})) {
@@ -183,6 +200,33 @@ bool create(const Spec &spec, QString *outName, QString *error)
         if (!seen) QThread::msleep(100);
     }
     if (!seen) { if (error) *error = QStringLiteral("виртуальный монитор не появился"); return false; }
+    // раскладка столов: на виртуальном мониторе — только выбранный стол (или отдельный «orbit»), остальные остаются на основном
+    {
+        auto dispatch = [](const QString &lua) { run(QStringLiteral("hyprctl"), {QStringLiteral("dispatch"), lua}); };
+        int gotWs = 0;                                                       // стол, который Hyprland выдал новому выходу сам
+        for (const QJsonValue &v : hyprMonitors()) {
+            const QJsonObject m = v.toObject();
+            if (m.value(QStringLiteral("name")).toString() == name) gotWs = m.value(QStringLiteral("activeWorkspace")).toObject().value(QStringLiteral("id")).toInt();
+        }
+        const bool keep = numberedWs && gotWs == wsId;
+        if (!keep && gotWs > 0)                                              // чужой стол с окнами — обратно на основной монитор
+            dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = %1, monitor = \"%2\" })").arg(gotWs).arg(homeMon));
+        if (!keep) {
+            dispatch(QStringLiteral("hl.dsp.focus({ monitor = \"%1\" })").arg(name));          // возврат чужого стола увёл фокус на основной
+            bool exists = false;                                              // стол уже есть (с окнами) на другом мониторе — переносим, иначе создаём на этом
+            if (numberedWs) {
+                QByteArray wo;
+                if (run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("workspaces")}, &wo))
+                    for (const QJsonValue &w : QJsonDocument::fromJson(wo).array()) if (w.toObject().value(QStringLiteral("id")).toInt() == wsId) exists = true;
+            }
+            if (numberedWs && exists) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = %1, monitor = \"%2\" })").arg(wsId).arg(name));
+            else dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(numberedWs ? QString::number(wsId) : QStringLiteral("\"name:orbit\"")));
+        }
+        // пользователя — на прежнее место: монитор, стол, курсор
+        dispatch(QStringLiteral("hl.dsp.focus({ monitor = \"%1\" })").arg(homeMon));
+        if (homeWs > 0 && homeWs != wsId) dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(homeWs));
+        if (homeCursor.x() >= 0) dispatch(QStringLiteral("hl.dsp.cursor.move({ x = %1, y = %2 })").arg(homeCursor.x()).arg(homeCursor.y()));
+    }
     // обои на новом мониторе: демон обоев сам их не рисует до следующей смены — ставятся текущие
     {
         QFile wf(QStandardPaths::writableLocation(QStandardPaths::HomeLocation) + QStringLiteral("/.local/state/hypr-theme/wallpaper"));
