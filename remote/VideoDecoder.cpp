@@ -103,11 +103,11 @@ void VideoDecoder::run()
                     if (!nv12 && !i420) { fail(QStringLiteral("непонятный формат пикселей кадра")); av_frame_unref(frame); break; }
                     const int w = frame->width, h = frame->height;
                     QVideoFrameFormat fmt(QSize(w, h), nv12 ? QVideoFrameFormat::Format_NV12 : QVideoFrameFormat::Format_YUV420P);
-                    // цвета: BT.709 помечают MediaCodec и видеокарты, BT.601 — x264 у нас; без метки HD-размер считается BT.709, как у плееров
-                    const bool bt709 = frame->colorspace == AVCOL_SPC_BT709 || (frame->colorspace == AVCOL_SPC_UNSPECIFIED && h >= 720);
+                    // цвета: BT.601 помечен только поток x264 у нас; всё остальное (видеокарта с явной матрицей, MediaCodec) — BT.709
+                    const bool bt709 = frame->colorspace == AVCOL_SPC_BT709 || frame->colorspace == AVCOL_SPC_UNSPECIFIED;      // без метки — BT.709 (так кодирует видеокарта: матрица задана явно)
                     fmt.setColorSpace(bt709 ? QVideoFrameFormat::ColorSpace_BT709 : QVideoFrameFormat::ColorSpace_BT601);
-                    fmt.setColorRange(frame->color_range == AVCOL_RANGE_JPEG || frame->format == AV_PIX_FMT_YUVJ420P ? QVideoFrameFormat::ColorRange_Full
-                                                                                                                    : QVideoFrameFormat::ColorRange_Video);
+                    // диапазон — всегда «видео» (16–235): кодеры Orbit отдают именно его, а метка «полный» в потоке от wf-recorder неверна — по ней чёрное светлело и контраст рос
+                    fmt.setColorRange(QVideoFrameFormat::ColorRange_Video);
                     QVideoFrame out(fmt);
                     if (out.map(QVideoFrame::WriteOnly)) {
                         auto copy = [](uchar *dst, int dstStride, const uint8_t *src, int srcStride, int rows, int bytes) {

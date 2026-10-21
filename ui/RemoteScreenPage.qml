@@ -295,9 +295,9 @@ Page {
         }
 
         // ---------- мышь ----------
-        // положение мыши уходит не чаще ~30 раз в секунду, а не на каждое событие
+        // положение мыши уходит не на каждое событие: ~30 раз в секунду, а на втором экране — ~100 (иначе курсор отстаёт от пальца и от картинки)
         QtObject { id: move; property real px: 0; property real py: 0; property bool moved: false }
-        Timer { interval: 33; repeat: true; running: page.live && move.moved; onTriggered: { RemoteDesktop.sendMoveAbsolute(move.px, move.py); move.moved = false; } }
+        Timer { interval: page.second ? 10 : 33; repeat: true; running: page.live && move.moved; onTriggered: { RemoteDesktop.sendMoveAbsolute(move.px, move.py); move.moved = false; } }
 
         MouseArea {
             id: mouse

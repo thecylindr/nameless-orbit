@@ -83,7 +83,7 @@ JNIEXPORT void JNICALL Java_org_glassrice_namelessorbit_OrbitVideoDecoder_native
     const qint64 yCap = env->GetDirectBufferCapacity(yb), uCap = env->GetDirectBufferCapacity(ub), vCap = env->GetDirectBufferCapacity(vb);
     const bool nv12 = uvPixel == 2 && V == U + 1;              // U и V чередуются (UVUV…) — самый частый случай у аппаратных декодеров
     QVideoFrameFormat fmt(QSize(w, h), nv12 ? QVideoFrameFormat::Format_NV12 : QVideoFrameFormat::Format_YUV420P);
-    fmt.setColorSpace(colorStd == 1 ? QVideoFrameFormat::ColorSpace_BT709 : QVideoFrameFormat::ColorSpace_BT601);
+    fmt.setColorSpace(colorStd == 2 || colorStd == 4 ? QVideoFrameFormat::ColorSpace_BT601 : QVideoFrameFormat::ColorSpace_BT709);      // нет метки (0) — BT.709: кодер на ПК задаёт её явно
     fmt.setColorRange(QVideoFrameFormat::ColorRange_Video);
     QVideoFrame frame(fmt);
     if (!frame.map(QVideoFrame::WriteOnly)) return;

@@ -21,7 +21,7 @@ class EdgeCrossing;
 //           RejectPairing(id), Ring(id), StopRing(id), SendClipboard(id), SendFile(id, path), RunCommand(id, commandId), ViewScreen(id), ShareScreen(id), SecondScreen(id), Notify(title, body, id|""), Show(), Quit()
 //           CrossTo(id, side, pos, screen) → bool — переход курсора на соседний компьютер; CrossStop() — вернуть курсор
 //   сигналы Changed() — состояние изменилось, можно перечитать Status(); отправляется вручную (notifyChanged), пачки склеиваются
-//           Crossing(json) — курсор ушёл с края или пришёл на край ({dir, side, pos, screen, peer}): по нему NameLess UI рисует эффект
+//           Crossing(json) — курсор ушёл с края или пришёл на край ({dir: out|in|deny, side, pos, screen, peer}): по нему NameLess UI рисует эффект
 // Сопряжение подтверждает человек: NameLess UI показывает тот же код, что и окно Orbit, и вызывает AcceptPairing только по
 // нажатию. Разрешения для устройств и удалённый экран через D-Bus не управляются — они остаются в самом Orbit
 class OrbitDBus : public QObject

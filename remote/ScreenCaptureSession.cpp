@@ -320,11 +320,17 @@ void ScreenCaptureSession::startWf()
         const int vh = qMax(180, int(qRound(double(vw) * capRect.height() / qMax(1, capRect.width()))) & ~1);
         const int mbit = qBound(3, int(3 + (m_wfQuality - 30) * 0.2 + 0.5), 16);
         const double areaK = double(vw) * vh / (1920.0 * 1080.0);
-        const int gop = qMax(15, m_wfFps);
+        // ключевой кадр чаще (раз в полсекунды) у второго экрана: если сеть на миг не справилась и кадры пропущены, ждать следующий ключевой надо недолго
+        const int gop = virt ? qMax(12, m_wfFps / 2) : qMax(15, m_wfFps);
         args << QStringLiteral("-c") << QStringLiteral("h264_vaapi") << QStringLiteral("-d") << vaDevice << QStringLiteral("-m") << QStringLiteral("h264")
              << QStringLiteral("-r") << QString::number(m_wfFps)
              << QStringLiteral("-b") << QStringLiteral("0");
-        if (vw < srcW) args << QStringLiteral("-F") << QStringLiteral("scale_vaapi=w=%1:h=%2:format=nv12").arg(vw).arg(vh);
+        // цвета: фильтр wf-recorder по умолчанию (scale_vaapi=format=nv12:out_range=full) отдаёт кадры «ограниченного» диапазона, но в поток записывает метку
+        // «полный диапазон» — зритель растягивал контраст, чёрное светлело, цвета плыли. Поэтому фильтр задаётся всегда и явно: матрица BT.709, диапазон tv
+        // (так же читают поток зрители: HD без метки — BT.709, видео-диапазон)
+        const QString colour = QStringLiteral("out_color_matrix=bt709:out_range=tv");
+        args << QStringLiteral("-F") << (vw < srcW ? QStringLiteral("scale_vaapi=w=%1:h=%2:format=nv12:%3").arg(vw).arg(vh).arg(colour)
+                                                  : QStringLiteral("scale_vaapi=format=nv12:%1").arg(colour));
         // low_power (VDEnc) + async_depth=1 + constrained baseline: по замеру на этом ноутбуке при том же 40 к/с поток 331 КБ/с вместо 598,
         // первый кадр на 35 мс раньше и меньше нагрузка на видеокарту; без B-кадров и CABAC декодирование у зрителя тоже быстрее
         args << QStringLiteral("-p") << QStringLiteral("g=%1").arg(gop)

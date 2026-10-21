@@ -56,6 +56,7 @@ EdgeCrossing::EdgeCrossing(PeerManager *manager, QObject *parent)
     m_answerT.setInterval(ANSWER_MS);
     connect(&m_answerT, &QTimer::timeout, this, [this]() {
         if (!m_waiting) return;
+        emitCrossing(QStringLiteral("deny"), m_side, m_pos, m_screen, m_manager->trustStore()->device(m_to).name);      // эффект «отказ»: переход не состоялся
         m_waiting = false; m_to.clear();
         emit activeChanged();
         emit errorOccurred(QStringLiteral("Соседний компьютер не ответил на переход курсора"));
@@ -406,6 +407,7 @@ void EdgeCrossing::handleMessage(const QString &deviceId, const QJsonObject &pay
         if (!grabInput()) {
             m_waiting = false;
             QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("leave"); m_manager->sendPlugin(m_to, name(), p);
+            emitCrossing(QStringLiteral("deny"), m_side, m_pos, m_screen, m_manager->trustStore()->device(m_to).name);
             m_to.clear(); emit activeChanged();
             emit errorOccurred(QStringLiteral("Не удалось захватить мышь и клавиатуру: нужен доступ к /dev/input (группа input)"));
             return;
@@ -415,6 +417,7 @@ void EdgeCrossing::handleMessage(const QString &deviceId, const QJsonObject &pay
         return;
     }
     if (kind == QLatin1String("denied")) {
+        emitCrossing(QStringLiteral("deny"), m_side, m_pos, m_screen, m_manager->trustStore()->device(m_to).name);
         m_answerT.stop(); m_waiting = false; m_to.clear(); emit activeChanged();
         emit errorOccurred(QStringLiteral("Переход курсора: ") + payload.value(QStringLiteral("reason")).toString());
         return;

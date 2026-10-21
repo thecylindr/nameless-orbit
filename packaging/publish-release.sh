@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Выпуск Orbit на GitHub одной командой: контрольные суммы, подпись, релиз, проверка.
 #   packaging/publish-release.sh --dry-run                       показать, что будет сделано, ничего не загружая
-#   packaging/publish-release.sh                                 версия — из CMakeLists.txt, файлы — из dist/
-#   packaging/publish-release.sh --dir ~/drones/deploy/dist/orbit --apk ~/Загрузки/Orbit.apk --sign --push
+#   packaging/publish-release.sh                                 версия — из CMakeLists.txt, архивы — найдутся сами
+#   packaging/publish-release.sh 0.2.4 --apk ~/Загрузки/Orbit.apk --push      версию можно написать просто числом
 #
 # Ключи:
 #   --version X.Y.Z   версия (по умолчанию — из CMakeLists.txt)
 #   --tag ИМЯ         тег релиза (по умолчанию vX.Y.Z; старые релизы без «v» — например --tag 0.2.3)
-#   --dir ПАПКА       где лежат nameless-orbit-X-linux-x86_64.tar.gz, …AppImage, …bundle… (по умолчанию dist/)
+#   --dir ПАПКА       где лежат nameless-orbit-X-linux-x86_64.tar.gz, …AppImage, …bundle…; по умолчанию ищется сам:
+#                     ~/drones/deploy/dist/orbit (make-bundle.sh, DEPLOY_DIR), затем dist/ (make-release.sh)
 #   --apk ФАЙЛ        APK для телефона (подписанный, как из Qt Creator)
 #   --sign            подписать SHA256SUMS своим ключом GPG → SHA256SUMS.asc (ключ: GPG_KEY=<id или почта>, иначе ключ по умолчанию)
 #   --notes ФАЙЛ      описание релиза (по умолчанию — раздел этой версии из CHANGELOG.md)
@@ -19,9 +20,11 @@
 # у тех, кто уже скачал, разошлась бы контрольная сумма. Нашли ошибку в файле — выпускайте следующую версию
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# путь к себе — до смены папки: запуск из packaging/ («./publish-release.sh») иначе ломал --help
+SELF="$(readlink -f "$0")"
+cd "$(dirname "$SELF")/.."
 REPO="${REPO:-thecylindr/nameless-orbit}"
-VER="" TAG="" DIR="dist" APK="" SIGN=0 NOTES="" PUSH=0 DRAFT=0 DRY=0
+VER="" TAG="" DIR="" APK="" SIGN=0 NOTES="" PUSH=0 DRAFT=0 DRY=0
 
 die() { printf '\n\033[31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
@@ -39,7 +42,8 @@ while [ $# -gt 0 ]; do
         --draft) DRAFT=1; shift ;;
         --repo) REPO="${2:?}"; shift 2 ;;
         --dry-run) DRY=1; shift ;;
-        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,24p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        [0-9]*.[0-9]*.[0-9]*) VER="$1"; shift ;;          # версия просто числом: publish-release.sh 0.2.4
         *) die "неизвестный ключ $1 (см. --help)" ;;
     esac
 done
@@ -47,17 +51,24 @@ done
 [ -n "$VER" ] || VER="$(grep -m1 -oP 'project\(nameless-orbit VERSION \K[0-9.]+' CMakeLists.txt)"
 [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "версия должна быть вида 0.2.4, а не «$VER»"
 TAG="${TAG:-v$VER}"
+# папка с архивами: сборка make-bundle.sh (для install.sh на любом Linux) или make-release.sh
+if [ -z "$DIR" ]; then
+    for d in "${DEPLOY_DIR:-$HOME/drones/deploy}/dist/orbit" dist; do
+        [ -f "$d/nameless-orbit-$VER-linux-x86_64.tar.gz" ] && { DIR="$d"; break; }
+    done
+    [ -n "$DIR" ] || die "не нашёл nameless-orbit-$VER-linux-x86_64.tar.gz ни в ${DEPLOY_DIR:-$HOME/drones/deploy}/dist/orbit, ни в dist/ — соберите: packaging/make-bundle.sh (или укажите папку: --dir …)"
+fi
 DIR="${DIR%/}"
 [ -d "$DIR" ] || die "нет папки $DIR"
 
 # ---- что выкладывается ----------------------------------------------------------------------------------------------
-say "Orbit $VER → релиз $TAG в $REPO"
+say "Orbit $VER → релиз $TAG в $REPO (файлы из $DIR)"
 FILES=()
 for f in "nameless-orbit-$VER-linux-x86_64.tar.gz" "nameless-orbit-$VER-bundle-linux-x86_64.tar.gz" "nameless-orbit-$VER-linux-x86_64.AppImage"; do
     [ -f "$DIR/$f" ] && FILES+=("$DIR/$f")
 done
 # без этого архива install.sh orbit не найдёт, что ставить
-[ -f "$DIR/nameless-orbit-$VER-linux-x86_64.tar.gz" ] || die "нет $DIR/nameless-orbit-$VER-linux-x86_64.tar.gz — соберите его (packaging/make-release.sh или ~/drones/deploy/package.sh)"
+[ -f "$DIR/nameless-orbit-$VER-linux-x86_64.tar.gz" ] || die "нет $DIR/nameless-orbit-$VER-linux-x86_64.tar.gz — соберите его: packaging/make-bundle.sh"
 if [ -n "$APK" ]; then
     [ -f "$APK" ] || die "нет APK: $APK"
     [[ "$APK" != *unsigned* ]] || die "APK неподписанный ($APK) — телефон его не поставит; соберите с «Подписать пакет» в Qt Creator"
