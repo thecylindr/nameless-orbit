@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.qtproject.example"
+    android:installLocation="auto"
+    android:versionCode="-- %%INSERT_VERSION_CODE%% --"
+    android:versionName="-- %%INSERT_VERSION_NAME%% --">
+    <!-- сеть: обнаружение и связь с устройствами; вибрация — для «Найти устройство»; уведомления — Android 13+ -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- фоновая работа: служба переднего плана типа «подключённое устройство» и Wi-Fi, не засыпающий с экраном -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- %%INSERT_PERMISSIONS -->
+    <!-- %%INSERT_FEATURES -->
+    <supports-screens
+        android:anyDensity="true"
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:smallScreens="true" />
+    <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:hardwareAccelerated="true"
+        android:label="-- %%INSERT_APP_NAME%% --"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:enableOnBackInvokedCallback="false"
+        android:allowBackup="true"
+        android:fullBackupOnly="false">
+        <activity
+            android:name="org.glassrice.namelessorbit.OrbitActivity"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:label="-- %%INSERT_APP_NAME%% --"
+            android:launchMode="singleTop"
+            android:screenOrientation="unspecified"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+          <!-- Qt по умолчанию замораживает цикл событий, когда окно скрыто (шторка, другое приложение, картинка в картинке):
+               сеть переставала читаться, кадры и подтверждения застревали. С этим признаком связь работает и в фоне -->
+          <meta-data
+                android:name="android.app.background_running"
+                android:value="true" />
+
+          <meta-data
+                android:name="android.app.lib_name"
+                android:value="-- %%INSERT_APP_LIB_NAME%% --" />
+
+          <meta-data
+                android:name="android.app.arguments"
+                android:value="-- %%INSERT_APP_ARGUMENTS%% --" />
+        </activity>
+
+        <service
+            android:name="org.glassrice.namelessorbit.OrbitService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="connectedDevice" />
+
+        <service
+            android:name="org.glassrice.namelessorbit.OrbitCaptureService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="mediaProjection" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.qtprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/qtprovider_paths"/>
+        </provider>
+    </application>
+</manifest>

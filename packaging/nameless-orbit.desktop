@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=NameLess Orbit
+Name[ru]=NameLess Orbit
+GenericName=Device link
+GenericName[ru]=Связь устройств
+Comment=Phone and computer together: clipboard, files, notifications, screen sharing, second screen
+Comment[ru]=Телефон и компьютер вместе: буфер, файлы, уведомления, показ экрана, второй экран
+Icon=nameless-orbit
+Exec=nameless-orbit
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=nameless-orbit

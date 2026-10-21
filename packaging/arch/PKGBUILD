@@ -1,0 +1,33 @@
+# Maintainer: укажите себя здесь
+# Сборка NameLess Orbit из git для Arch Linux:  cd packaging/arch && makepkg -si
+pkgname=nameless-orbit-git
+pkgver=0.2.0
+pkgrel=1
+pkgdesc='Связь своих устройств в одной сети: файлы, буфер, уведомления, показ экрана, второй экран, звук'
+arch=('x86_64')
+url='https://github.com/thecylindr/nameless-orbit'
+license=('MIT')
+depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-svg' 'qt6-wayland' 'ffmpeg' 'wf-recorder' 'libpulse')
+makedepends=('git' 'cmake' 'ninja' 'qt6-tools')
+optdepends=('hyprland: второй экран (виртуальный монитор)'
+            'awww: обои на втором экране'
+            'opus: сжатие звука')
+provides=('nameless-orbit')
+conflicts=('nameless-orbit')
+source=("$pkgname::git+$url.git")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "$pkgname"
+    git describe --long --tags 2>/dev/null | sed 's/^v//;s/-/.r/;s/-/./' || printf '0.1.0.r%s.%s' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cmake -S "$pkgname" -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+    cmake --build build
+}
+
+package() {
+    DESTDIR="$pkgdir" cmake --install build
+    install -Dm644 "$pkgname/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

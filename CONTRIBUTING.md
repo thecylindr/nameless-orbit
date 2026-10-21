@@ -1,0 +1,19 @@
+# Как помочь проекту
+
+## Сообщить об ошибке
+Опишите, что делали и что произошло. Приложите журнал показа экрана (`~/.cache/glassrice/NameLess Orbit/orbit-video.log`) и, для Android, вывод `adb logcat`. Не забудьте версию (`nameless-orbit` → «Настройки»).
+
+## Собрать
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build
+```
+Нужны Qt 6 (base, declarative, multimedia, svg, wayland), для видео на ПК — ffmpeg (libavcodec), для показа экрана — wf-recorder, для звука — libpulse (`parec`). Android собирается через Qt for Android (см. `android/`).
+
+## Стиль
+- Комментарии по-русски, короткие, объясняют «почему».
+- Тексты интерфейса — в `qsTr("…")`; английский перевод — в `i18n/en.json`.
+- Новый код — в стиле соседнего: имена, отступы, разбиение на классы.
+
+## Перед pull request
+Проверьте, что проект собирается, и обновите `CHANGELOG.md`.
