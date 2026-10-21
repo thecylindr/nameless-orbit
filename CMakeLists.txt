@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(nameless-orbit VERSION 0.2.0 LANGUAGES CXX)
+project(nameless-orbit VERSION 0.2.1 LANGUAGES CXX)
 add_compile_definitions(APP_VERSION_STR="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -129,7 +129,11 @@ endif()
 
 # Android: свой манифест (разрешения для сети, вибрации, уведомлений) на основе шаблона Qt
 if(ANDROID)
+    # код версии растёт вместе с версией проекта (0.2.1 → 201): Android ставит новый APK поверх старого только при большем коде
+    math(EXPR ORBIT_VERSION_CODE "${PROJECT_VERSION_MAJOR} * 10000 + ${PROJECT_VERSION_MINOR} * 100 + ${PROJECT_VERSION_PATCH}")
     set_target_properties(nameless-orbit PROPERTIES
+        QT_ANDROID_VERSION_NAME ${PROJECT_VERSION}
+        QT_ANDROID_VERSION_CODE ${ORBIT_VERSION_CODE}
         QT_ANDROID_PACKAGE_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/android
         QT_ANDROID_MIN_SDK_VERSION 28
         QT_ANDROID_TARGET_SDK_VERSION 35

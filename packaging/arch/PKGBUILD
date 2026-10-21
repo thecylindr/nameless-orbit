@@ -1,7 +1,7 @@
 # Maintainer: укажите себя здесь
 # Сборка NameLess Orbit из git для Arch Linux:  cd packaging/arch && makepkg -si
 pkgname=nameless-orbit-git
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc='Связь своих устройств в одной сети: файлы, буфер, уведомления, показ экрана, второй экран, звук'
 arch=('x86_64')
