@@ -5,6 +5,8 @@
 #include <QAudioDevice>
 #include <QStandardPaths>
 #include <QIODevice>
+#include <QRegularExpression>
+#include <QTimer>
 #include <cstring>
 
 #if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
@@ -95,6 +97,7 @@ bool AudioStream::startCapture(const QString &source, const QString &codec, int 
     m_parec->start(QStringLiteral("parec"), {QStringLiteral("--device=") + (source.isEmpty() ? QStringLiteral("@DEFAULT_MONITOR@") : source),
                                               QStringLiteral("--format=s16le"), QStringLiteral("--rate=48000"), QStringLiteral("--channels=2"),
                                               QStringLiteral("--latency-msec=20")});
+    watchVolume(source);
     return true;
 #else
     Q_UNUSED(source) Q_UNUSED(codec) Q_UNUSED(opusKbps)
@@ -103,8 +106,59 @@ bool AudioStream::startCapture(const QString &source, const QString &codec, int 
 #endif
 }
 
+// источник — монитор выхода (по умолчанию или «<выход>.monitor»): следим за громкостью этого выхода
+void AudioStream::watchVolume(const QString &source)
+{
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+    m_volSink = source.isEmpty() || source == QLatin1String("@DEFAULT_MONITOR@") ? QStringLiteral("@DEFAULT_SINK@")
+              : (source.endsWith(QLatin1String(".monitor")) ? source.chopped(8) : QString());
+    m_lastVol = -1;
+    if (m_volSink.isEmpty() || QStandardPaths::findExecutable(QStringLiteral("pactl")).isEmpty()) return;
+    m_volWatch = new QProcess(this);
+    m_volWatch->setChildProcessModifier([]() { prctl(PR_SET_PDEATHSIG, SIGTERM); });
+    connect(m_volWatch, &QProcess::readyReadStandardOutput, this, [this]() {
+        // «Event 'change' on sink #57» и смена выхода по умолчанию («on server») — перечитать громкость; пачка событий — один запрос
+        bool relevant = false;
+        while (m_volWatch && m_volWatch->canReadLine()) {
+            const QByteArray line = m_volWatch->readLine();
+            relevant = relevant || line.contains(" sink ") || line.contains(" server");
+        }
+        if (relevant) QTimer::singleShot(40, this, &AudioStream::queryVolume);
+    });
+    m_volWatch->start(QStringLiteral("pactl"), {QStringLiteral("subscribe")});
+    queryVolume();
+#else
+    Q_UNUSED(source)
+#endif
+}
+
+void AudioStream::queryVolume()
+{
+#if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
+    if (m_volSink.isEmpty() || !m_parec) return;
+    auto *p = new QProcess(this);
+    connect(p, &QProcess::finished, this, [this, p]() {
+        const QString out = QString::fromUtf8(p->readAllStandardOutput());
+        p->deleteLater();
+        // «Volume: front-left: 29491 /  45% / -20,81 dB, …» и «Mute: no»: громкость — среднее по каналам
+        static const QRegularExpression pctRe(QStringLiteral("(\\d+)%"));
+        int sum = 0, n = 0;
+        for (auto it = pctRe.globalMatch(out.section(QLatin1Char('\n'), 0, 0)); it.hasNext();) { sum += it.next().captured(1).toInt(); ++n; }
+        if (n == 0) return;
+        const double level = sum / (100.0 * n);
+        const bool muted = out.contains(QLatin1String("Mute: yes"));
+        if (qAbs(level - m_lastVol) < 0.005 && muted == m_lastMute) return;
+        m_lastVol = level; m_lastMute = muted;
+        emit volumeChanged(level, muted);
+    });
+    p->start(QStringLiteral("sh"), {QStringLiteral("-c"), QStringLiteral("LC_ALL=C pactl get-sink-volume \"$1\"; LC_ALL=C pactl get-sink-mute \"$1\""),
+                                    QStringLiteral("sh"), m_volSink});
+#endif
+}
+
 void AudioStream::stopCapture()
 {
+    if (m_volWatch) { m_volWatch->disconnect(this); m_volWatch->kill(); m_volWatch->deleteLater(); m_volWatch = nullptr; }
     if (m_parec) {
         QProcess *p = m_parec;
         m_parec = nullptr;                      // сначала сбросить: сигнал finished от остановки не считается сбоем

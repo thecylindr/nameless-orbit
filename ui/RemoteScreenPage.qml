@@ -332,6 +332,7 @@ Page {
         // ---------- клавиатура ----------
         Keys.enabled: page.live
         Keys.onPressed: e => {
+            if (e.key === Qt.Key_ScrollLock && page.kbPaused) { page.kbPaused = false; e.accepted = true; return; }     // снова отдать клавиатуру
             var name = page.keyName(e.key);
             var mods = [];
             if (e.modifiers & Qt.ControlModifier) mods.push("ctrl");
@@ -537,7 +538,43 @@ Page {
     }
     Keys.onEscapePressed: page.fs = false
 
+    // ---- второй экран на компьютере: вся клавиатура — туда (и Super, Alt+Tab, Ctrl+Alt+…), пока окно активно и управление разрешено.
+    // Scroll Lock снимает захват; снова — Scroll Lock в окне или повторная активация окна
+    property bool kbPaused: false
+    readonly property bool kbWanted: page.second && !IsMobile && page.live && Window.window !== null && Window.window.active && !kbPaused
+    onKbWantedChanged: RemoteDesktop.setKeyboardGrab(kbWanted)
+    Connections {
+        target: Window.window
+        function onActiveChanged() { if (Window.window && !Window.window.active) page.kbPaused = false; }
+    }
+    Connections {
+        target: RemoteDesktop
+        function onKeyboardReleasedByUser() { page.kbPaused = true; kbHint.show(); }
+        function onKeyboardGrabChanged() { if (RemoteDesktop.keyboardGrabbed) kbHint.show(); }
+    }
+    Keys.onPressed: e => { if (e.key === Qt.Key_ScrollLock && page.kbPaused) { page.kbPaused = false; e.accepted = true; } }
+    Rectangle {
+        id: kbHint
+        function show() { opacity = 1; kbHintT.restart(); }
+        visible: opacity > 0.01 && page.second && !IsMobile
+        opacity: 0
+        Behavior on opacity { NumberAnimation { duration: 250 } }
+        Timer { id: kbHintT; interval: 3000; onTriggered: kbHint.opacity = 0 }
+        z: 40
+        anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 18 }
+        width: kbTxt.implicitWidth + 32; height: 36; radius: 18
+        color: Qt.rgba(0, 0, 0, 0.72)
+        Text {
+            id: kbTxt
+            anchors.centerIn: parent
+            text: RemoteDesktop.keyboardGrabbed ? qsTr("Вся клавиатура — на том компьютере · Scroll Lock — вернуть себе")
+                                               : qsTr("Клавиатура снова здесь · Scroll Lock — отдать тому компьютеру")
+            color: "white"; font.family: Theme.fontFamily; font.pixelSize: 13
+        }
+    }
+
     Component.onDestruction: {
+        RemoteDesktop.setKeyboardGrab(false);
         if (Window.window && Window.window.pageFullscreen !== undefined) Window.window.pageFullscreen = false;
         if (IsMobile) RemoteDesktop.setFullscreenView(false, 0);
         else if (fs && Window.window) Window.window.visibility = Window.Windowed;

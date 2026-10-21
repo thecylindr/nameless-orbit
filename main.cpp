@@ -5,6 +5,7 @@
 #endif
 
 #include <QGuiApplication>
+#include <QTimer>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QIcon>
@@ -163,8 +164,20 @@ int main(int argc, char *argv[])
     orbitDBus.setRepliesGate([&settings]() { return settings.sendReplies(); });
     dbus = &orbitDBus;
 #ifdef ORBIT_DESKTOP_LINUX
-    if (!orbitDBus.registerOnBus())
-        qWarning() << "[main] D-Bus недоступен — виджет NameLess UI не увидит Orbit";
+    // имя на шине может быть ещё занято (прежний Orbit завершается) или шина не готова при входе в сессию: повтор каждые 5 с —
+    // иначе NameLess UI считал Orbit незапущенным, а кнопка «Запустить» молча натыкалась на этот же работающий экземпляр
+    if (!orbitDBus.registerOnBus()) {
+        qWarning() << "[main] D-Bus недоступен — повтор каждые 5 секунд";
+        auto *busRetry = new QTimer(&app);
+        busRetry->setInterval(5000);
+        QObject::connect(busRetry, &QTimer::timeout, &app, [&orbitDBus, busRetry]() {
+            if (!orbitDBus.registerOnBus()) return;
+            qInfo() << "[main] D-Bus: Orbit зарегистрирован на шине";
+            busRetry->stop();
+            busRetry->deleteLater();
+        });
+        busRetry->start();
+    }
 #endif
 
     // создаётся ДО engine, чтобы пережить его: при выходе engine разбирает привязки QML, а им ещё нужны

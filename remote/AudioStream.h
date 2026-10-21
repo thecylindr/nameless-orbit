@@ -46,6 +46,9 @@ public:
 
 signals:
     void packet(const QByteArray &data, const QString &codec);       // готовый кусок звука 20 мс — в сеть
+    // отправка: громкость выхода, который снимается (доля по шкале системы: 1 — 100 %), и «без звука». Монитор выхода её не учитывает —
+    // её отдельно повторяет приёмник, чтобы звук был таким же громким, как на этом компьютере
+    void volumeChanged(double level, bool muted);
     void failed(const QString &reason);
 
 private:
@@ -57,7 +60,13 @@ private:
     void closeCodecs();
     void ensureSink();
 
+    void watchVolume(const QString &source);       // слежение за громкостью выхода: pactl subscribe — по событиям, без опроса
+    void queryVolume();
     QProcess *m_parec = nullptr;
+    QProcess *m_volWatch = nullptr;
+    QString m_volSink;                             // выход, громкость которого повторяется (пусто — снимается вход, повторять нечего)
+    double m_lastVol = -1;
+    bool m_lastMute = false;
     QByteArray m_buf;
     QString m_codec;
 

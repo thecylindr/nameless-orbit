@@ -58,6 +58,7 @@ qt_add_executable(nameless-orbit
     remote/FrameView.h
     remote/InputInjector.cpp
     remote/EdgeCrossing.cpp
+    remote/KeyboardGrab.cpp
     remote/RemoteDesktopController.cpp
     remote/VideoDecoder.cpp
     remote/AudioStream.cpp

@@ -8,6 +8,7 @@
 #include "VirtualDisplay.h"
 #include <QTimer>
 #include "AudioStream.h"
+#include "KeyboardGrab.h"
 #include <QRectF>
 #include <QSize>
 #include <QElapsedTimer>
@@ -77,7 +78,8 @@ class RemoteDesktopController : public PluginBase
     Q_PROPERTY(int sendFps READ sendFps NOTIFY statsChanged)
     Q_PROPERTY(bool captureAvailable READ captureAvailable CONSTANT)      // можно ли показывать свой экран с этой системы
     Q_PROPERTY(int controlState READ controlState NOTIFY inputArmedChanged)      // у зрителя: 0 не просили, 1 ждём ответа, 2 разрешено, 3 отказано
-    Q_PROPERTY(bool reconnecting READ reconnecting NOTIFY viewingChanged) // связь с показывающим устройством оборвалась, поток восстанавливается
+    Q_PROPERTY(bool reconnecting READ reconnecting NOTIFY viewingChanged)
+    Q_PROPERTY(bool keyboardGrabbed READ keyboardGrabbed NOTIFY keyboardGrabChanged)   // зритель второго экрана: все клавиши уходят на тот компьютер // связь с показывающим устройством оборвалась, поток восстанавливается
     Q_PROPERTY(QObject *videoSink READ videoSinkObject WRITE setVideoSinkObject NOTIFY videoSinkChanged)   // VideoOutput.videoSink страницы просмотра
     Q_PROPERTY(bool videoOnSink READ videoOnSink NOTIFY frameUpdated)     // кадр видео рисует VideoOutput — FrameView прячется
     Q_PROPERTY(QRectF frameRegion READ frameRegion NOTIFY frameUpdated)        // какую часть экрана показывает текущий кадр (в долях)
@@ -145,6 +147,9 @@ public:
 
     void handleMessage(const QString &deviceId, const QJsonObject &payload) override;
     Q_INVOKABLE void setAudio(bool on, const QString &codecPref = QString());      // зритель: включить или выключить звук показывающего устройства
+    // зритель второго экрана: захватить клавиатуру целиком (сочетания системы тоже уходят туда) или вернуть; Scroll Lock — вернуть самому
+    Q_INVOKABLE void setKeyboardGrab(bool on);
+    bool keyboardGrabbed() const { return m_kbGrab.active(); }
     bool needsPermission(const QJsonObject &p) const override
     {
         const QString k = p.value(QStringLiteral("kind")).toString();
@@ -221,6 +226,8 @@ signals:
     void controlRequested(const QString &deviceId, const QString &name);   // «Иван просит управление» на стороне показывающего
     void errorOccurred(const QString &message);
     void videoSinkChanged();
+    void keyboardGrabChanged();
+    void keyboardReleasedByUser();       // Scroll Lock: захват снят человеком — страница не захватывает снова, пока окно не активируют заново
 
 private slots:
     void onFrameReady(const QByteArray &jpeg, int width, int height);
@@ -265,6 +272,9 @@ private:
     AudioStream m_audioIn;                            // зритель: звук показывающего — в динамики
     QString m_audioState, m_audioCodecIn;             // состояние приёма звука
     bool m_audioWant = false;
+    KeyboardGrab m_kbGrab;                            // зритель второго экрана: клавиатура целиком
+    double m_hostVolume = 1.0;                        // зритель: громкость выхода показывающего (доля, шкала системы) — звук повторяет её
+    bool m_hostMuted = false;
     QString m_audioOverride = QStringLiteral("auto"), m_audioCodecPref;   // выбор из окна второго экрана: auto | on | off и кодек
     void applyAudioSettings();
     QString who(const QString &deviceId) const;      // имя устройства для журнала

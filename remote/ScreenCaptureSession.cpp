@@ -310,6 +310,7 @@ void ScreenCaptureSession::startWf()
         const int vw = qMax(320, qMin(m_wfWidth, srcW) & ~1);
         const int vh = qMax(180, int(qRound(double(vw) * capRect.height() / qMax(1, capRect.width()))) & ~1);
         const int mbit = qBound(3, int(3 + (m_wfQuality - 30) * 0.2 + 0.5), 16);
+        const double areaK = double(vw) * vh / (1920.0 * 1080.0);
         const int gop = qMax(15, m_wfFps);
         args << QStringLiteral("-c") << QStringLiteral("h264_vaapi") << QStringLiteral("-d") << vaDevice << QStringLiteral("-m") << QStringLiteral("h264")
              << QStringLiteral("-r") << QString::number(m_wfFps)
@@ -323,15 +324,19 @@ void ScreenCaptureSession::startWf()
              << QStringLiteral("-p") << QStringLiteral("async_depth=1")
              << QStringLiteral("-p") << QStringLiteral("profile=constrained_baseline")
              << QStringLiteral("-p") << QStringLiteral("rc_mode=VBR")
-             << QStringLiteral("-p") << QStringLiteral("b=%1M").arg(qMax(2, mbit * vw / 1920))
-             << QStringLiteral("-p") << QStringLiteral("maxrate=%1M").arg(qMax(3, mbit * vw / 1920 * 3 / 2))
+             // скорость — по площади кадра, а не по ширине: у высокого экрана (портретный второй экран 1068×2388) по ширине выходило
+             // ~3 Мбит/с на 2,5 млн точек — текст «мылился»
+             << QStringLiteral("-p") << QStringLiteral("b=%1M").arg(qBound(2, int(mbit * areaK + 0.5), 40))
+             << QStringLiteral("-p") << QStringLiteral("maxrate=%1M").arg(qBound(3, int(mbit * areaK * 1.5 + 0.5), 60))
              << QStringLiteral("-f") << QStringLiteral("/dev/stdout");
     } else if (m_video) {
         // H.264 x264 без задержки: ключевой кадр раз в секунду (с него зритель начинает разжатие), AUD в начале каждого кадра — по ним поток делится на кадры,
         // SPS/PPS при каждом ключевом; цветовая матрица BT.601 помечена явно (так переводит swscale), иначе телефон считает её BT.709 и цвета чуть плывут.
         // Качество 30..95 → crf 36..20; потолок скорости ограничивает всплески на движущихся сценах
         const int crf = qBound(18, int(20 + (95 - m_wfQuality) * 16.0 / 65.0 + 0.5), 38);
-        const int maxRate = m_wfWidth >= 1600 ? 14000 : (m_wfWidth >= 1100 ? 8000 : 4500);          // кбит/с
+        // потолок скорости — по площади кадра (кбит/с): ~14 Мбит/с на 1080p, у высокого экрана — больше, у маленького окна — меньше
+        const double outW = qMin(m_wfWidth, int(capRect.width() * screenDpr)), outH = outW * capRect.height() / qMax(1, capRect.width());
+        const int maxRate = qBound(3000, int(14000.0 * outW * outH / (1920.0 * 1080.0)), 40000);
         const int gop = qMax(15, m_wfFps);
         args << QStringLiteral("-c") << QStringLiteral("libx264") << QStringLiteral("-m") << QStringLiteral("h264")
              << QStringLiteral("-r") << QString::number(m_wfFps)

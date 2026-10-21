@@ -44,7 +44,9 @@ bool OrbitDBus::registerOnBus()
 #else
     QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected()) return false;
-    if (!bus.registerObject(QString::fromLatin1(kPath), this, QDBusConnection::ExportAllSlots | QDBusConnection::ExportScriptableSignals))
+    // повторный вызов (имя было занято) — объект уже на месте, остаётся занять имя
+    if (bus.objectRegisteredAt(QString::fromLatin1(kPath)) != this &&
+        !bus.registerObject(QString::fromLatin1(kPath), this, QDBusConnection::ExportAllSlots | QDBusConnection::ExportScriptableSignals))
         return false;
     return bus.registerService(QString::fromLatin1(kService));
 #endif

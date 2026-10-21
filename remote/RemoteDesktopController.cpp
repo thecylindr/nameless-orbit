@@ -14,6 +14,7 @@
 #include <QQmlEngine>
 #include <QBuffer>
 #include <QJsonArray>
+#include <cmath>
 #include <QGuiApplication>
 #include <QPainter>
 #include <QThreadPool>
@@ -70,6 +71,20 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
         m_audioOut.stopCapture();
     });
     connect(&m_audioIn, &AudioStream::failed, this, [this](const QString &why) { ScreenCaptureSession::log(QStringLiteral("Звук (приём): %1").arg(why)); stopAudioIn(QStringLiteral("off:") + why); });
+    // громкость этого компьютера (и «без звука») — зрителю: у него звук такой же громкий, как здесь
+    connect(&m_audioOut, &AudioStream::volumeChanged, this, [this](double level, bool muted) {
+        if (m_sharingTo.isEmpty()) return;
+        QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("audioVol"); p[QStringLiteral("v")] = level; p[QStringLiteral("m")] = muted;
+        sendToPeer(m_sharingTo, p);
+    });
+    // клавиатура зрителя второго экрана: каждая клавиша — сразу (их мало, задержка важнее пачек)
+    connect(&m_kbGrab, &KeyboardGrab::key, this, [this](int code, int value) {
+        if (m_viewing.isEmpty()) return;
+        QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("input"); p[QStringLiteral("op")] = QStringLiteral("raw");
+        p[QStringLiteral("e")] = QJsonArray{QJsonArray{1 /* EV_KEY */, code, value}};
+        sendToPeer(m_viewing, p);
+    });
+    connect(&m_kbGrab, &KeyboardGrab::released, this, [this]() { emit keyboardGrabChanged(); emit keyboardReleasedByUser(); });
     connect(m_settings, &SettingsManager::audioChanged, this, [this]() { applyAudioSettings(); });
     connect(this, &RemoteDesktopController::viewingChanged, this, [this]() { if (m_viewing.isEmpty() && (m_audioWant || !m_audioState.isEmpty())) stopAudioIn(); });
     applyAudioSettings();
@@ -365,8 +380,11 @@ void RemoteDesktopController::applyLevel()
     }
     if (videoLadder()) {
         const VLevel &vl = kVideo[qBound(0, m_level, kVideoLevelCount - 1)];
-        m_capture.setMaxWidth(qMax(640, int(base * vl.scale)));
-        m_capture.setJpegQuality(qMax(30, qualityCap - vl.crfAdd * 4));
+        // второй экран — это монитор: текст должен оставаться чётким, поэтому при плохой сети снижается частота, а размер не трогается,
+        // и качество проседает вдвое мягче
+        const bool monitor = m_ssFps > 0;
+        m_capture.setMaxWidth(qMax(640, int(base * (monitor ? 1.0 : vl.scale))));
+        m_capture.setJpegQuality(qMax(30, qualityCap - vl.crfAdd * (monitor ? 2 : 4)));
         static const int kExtKbps[] = {9000, 7500, 6000, 5000, 4000, 3200, 2500, 1800, 1200};       // скорость кодера телефона по ступеням лесенки
         m_extBitrateKbps = kExtKbps[qBound(0, m_level, kVideoLevelCount - 1)] * qBound(30, qualityCap, 95) / 75;
         int vfps = qMin(fpsCap, vl.fps);
@@ -451,6 +469,7 @@ void RemoteDesktopController::sendStatus(const QString &deviceId, const QString 
 void RemoteDesktopController::endViewing()
 {
     if (m_viewing.isEmpty()) return;
+    if (m_kbGrab.active()) { m_kbGrab.release(); emit keyboardGrabChanged(); }
     m_viewing.clear(); m_viewNote.clear();
     m_reconnecting = false; m_reconnectTimeout.stop();
     m_frameSeq = 0;
@@ -479,6 +498,7 @@ void RemoteDesktopController::beginViewing(const QString &deviceId)
 {
     m_viewing = deviceId;    // UI сразу показывает «ожидание ответа…»; кадры придут, когда другая сторона согласится
     m_viewStage = 0;
+    m_hostVolume = 1.0; m_hostMuted = false;
     m_viewNote.clear();
     ScreenCaptureSession::log(QStringLiteral("Смотрим экран устройства %1: запрос отправлен").arg(who(deviceId)));
     m_reconnecting = false;
@@ -653,6 +673,7 @@ void RemoteDesktopController::offerShare(const QString &deviceId, const QString 
 void RemoteDesktopController::stopViewing()
 {
     if (m_viewing.isEmpty()) return;
+    setKeyboardGrab(false);                 // зажатые клавиши отпускаются у той стороны, пока она ещё на связи
     QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareStop"); p[QStringLiteral("by")] = QStringLiteral("viewer");
     sendToPeer(m_viewing, p);
     m_viewing.clear();
@@ -779,7 +800,10 @@ QString RemoteDesktopController::who(const QString &deviceId) const
 
 void RemoteDesktopController::applyAudioSettings()
 {
-    m_audioIn.setVolume(m_settings->audioVolume() / 100.0);
+    // громкость повторяет выход показывающего: его доля по шкале системы (кубической, как у PulseAudio) → линейная, умноженная на свою
+    // громкость приёма из настроек. «Без звука» там — тишина здесь
+    const double host = m_hostMuted ? 0.0 : qMin(1.0, std::pow(qBound(0.0, m_hostVolume, 1.5), 3.0));
+    m_audioIn.setVolume(host * m_settings->audioVolume() / 100.0);
     m_audioIn.setLatencyMs(m_settings->audioLatencyMs());
 }
 
@@ -791,6 +815,19 @@ void RemoteDesktopController::stopAudioIn(const QString &state)
     m_audioCodecIn.clear();
     m_audioState = state;
     emit audioStateChanged();
+}
+
+void RemoteDesktopController::setKeyboardGrab(bool on)
+{
+    // захватывать есть смысл, только пока идёт второй экран и тот компьютер разрешил управление
+    on = on && !m_viewing.isEmpty() && m_secondViewing && m_controlState == 2 && KeyboardGrab::available();
+    if (on == m_kbGrab.active()) return;
+    if (on && !m_kbGrab.grab()) {
+        emit errorOccurred(QStringLiteral("Клавиатуру захватить не удалось: нужен доступ к /dev/input (группа input)"));
+        return;
+    }
+    if (!on) m_kbGrab.release();
+    emit keyboardGrabChanged();
 }
 
 void RemoteDesktopController::setAudio(bool on, const QString &codecPref)
@@ -1217,6 +1254,13 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
         else { stopAudioIn(QStringLiteral("off:") + payload.value(QStringLiteral("reason")).toString()); emit errorOccurred(QStringLiteral("Звук не включён: ") + payload.value(QStringLiteral("reason")).toString()); }
         return;
     }
+    if (kind == QLatin1String("audioVol")) {
+        if (m_viewing != deviceId) return;
+        m_hostVolume = payload.value(QStringLiteral("v")).toDouble(1.0);
+        m_hostMuted = payload.value(QStringLiteral("m")).toBool(false);
+        applyAudioSettings();
+        return;
+    }
     if (kind == QLatin1String("audio")) {
         if (m_viewing == deviceId && m_audioWant) m_audioIn.play(QByteArray::fromBase64(payload.value(QStringLiteral("d")).toString().toLatin1()), payload.value(QStringLiteral("c")).toString());
         return;
@@ -1434,6 +1478,13 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
             m_input.keyTap(payload.value(QStringLiteral("key")).toString(), mods);
         } else if (op == QLatin1String("type")) {
             m_input.typeText(payload.value(QStringLiteral("text")).toString());
+        } else if (op == QLatin1String("raw")) {
+            // клавиатура зрителя целиком (второй экран): коды evdev как есть — раскладка и сочетания работают, как у своей клавиатуры
+            for (const QJsonValue &v : payload.value(QStringLiteral("e")).toArray()) {
+                const QJsonArray a = v.toArray();
+                if (a.size() == 3) m_input.rawEvent(quint16(a.at(0).toInt()), quint16(a.at(1).toInt()), a.at(2).toInt());
+            }
+            m_input.rawSync();
         }
         return;
     }

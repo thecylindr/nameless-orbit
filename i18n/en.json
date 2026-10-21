@@ -338,5 +338,7 @@
  "Запрос отправлен": "Request sent",
  "Ждём первые кадры. На том устройстве может появиться системное окно захвата экрана — подтвердите его": "Waiting for the first frames. A system screen-capture dialog may appear on that device — confirm it",
  "Ждём, пока владелец экрана разрешит показ…": "Waiting for the screen owner to allow sharing…",
- "Ожидание: ": "Waiting: "
+ "Ожидание: ": "Waiting: ",
+ "Вся клавиатура — на том компьютере · Scroll Lock — вернуть себе": "The whole keyboard goes to that computer · Scroll Lock — take it back",
+ "Клавиатура снова здесь · Scroll Lock — отдать тому компьютеру": "Keyboard is back here · Scroll Lock — give it to that computer"
 }
