@@ -20,5 +20,12 @@ strip --strip-unneeded "$STAGE/usr/bin/nameless-orbit" 2>/dev/null || true
 mkdir -p dist
 tar -C "$STAGE" -czf "$OUT" usr
 echo "  -> готово: $OUT"
-sha256sum "$OUT"
-echo "  Дальше: загрузите архив в GitHub Release v$VER и вставьте sha256 в packaging/arch-bin/PKGBUILD"
+# файл контрольных сумм: по нему установщик проверяет, что скачан именно этот архив и он не повреждён
+( cd dist && sha256sum "$(basename "$OUT")" > SHA256SUMS )
+cat dist/SHA256SUMS
+# подпись (необязательно, но желательно): ORBIT_SIGN=1 packaging/make-release.sh — нужен ваш GPG-ключ (gpg --list-secret-keys)
+if [[ "${ORBIT_SIGN:-0}" == 1 ]]; then
+    rm -f dist/SHA256SUMS.asc
+    gpg --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS && echo "  -> подпись: dist/SHA256SUMS.asc"
+fi
+echo "  Дальше: загрузите архив и dist/SHA256SUMS (и .asc) в GitHub Release v$VER, вставьте sha256 в packaging/arch-bin/PKGBUILD"
