@@ -1,21 +1,154 @@
-MIT License
+NameLess Source-Available License 1.0 (NSAL-1.0)
+Лицензия «исходный код доступен» NameLess, версия 1.0
 
-Copyright (c) 2026 NameLess Orbit contributors
+Copyright (c) 2026 thecylindr. All rights reserved. / Все права защищены.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Project / Проект: NameLess Orbit
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+══════════════════════════════════════════════════════════════════════════════
+ENGLISH (authoritative text / основной текст)
+══════════════════════════════════════════════════════════════════════════════
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+1. WHAT YOU MAY DO
+   The licensor ("Author") grants you a personal, non-exclusive, non-transferable,
+   revocable licence to:
+   (a) read and study the source code;
+   (b) build the software from source and run it for your own personal,
+       non-commercial use on devices that you own or control;
+   (c) modify your own copy for that same personal use;
+   (d) send suggestions, bug reports and patches (as text or a pull request branch
+       inside the Author's own repository) to the Author.
+   Creating a fork or any other copy of the repository on a hosting platform or
+   elsewhere is NOT allowed unless the Author has given you permission in writing
+   BEFORE you create it (an answer in an issue or by e-mail is enough). A permitted
+   fork exists only for the purpose and for the time stated in that permission, and
+   must clearly state who the Author is and link to the original repository.
+
+2. WHAT YOU MAY NOT DO
+   Without the Author's prior written permission you may not:
+   (a) copy, fork, publish, upload, mirror or otherwise distribute the software, or
+       any substantial part of it (in whole or in part, in source or binary form,
+       modified or unmodified), anywhere — including private and public repositories,
+       archives and file-sharing services — except with the permission described in 1(d);
+   (b) publish or distribute derivative works, forks, ports, "rewrites", themes or
+       packages that contain or are derived from the software or its substantial parts;
+   (c) use the software or any part of it for commercial purposes: sell, rent,
+       sublicense, bundle it with a paid product or service, or use it to provide
+       a paid or advertising-supported service;
+   (d) present the software or derivative works as your own (for example, publish it
+       under your name, a school/university assignment, a portfolio or a competition
+       entry), remove or alter copyright notices, the name "NameLess", logos, commit
+       history, authorship information or this licence, or release anything under a
+       confusingly similar name;
+   (e) use the software, its source code or its documentation as material for
+       building datasets or for training machine-learning models, or collect it in
+       bulk with automated tools;
+   (f) circumvent any technical measure that the software uses to protect users
+       (for example, the pairing and permission checks of NameLess Orbit) in order
+       to access other people's devices.
+
+3. CONTRIBUTIONS
+   If you send a contribution (code, translation, documentation), you grant the
+   Author a perpetual, worldwide, irrevocable, royalty-free licence to use, modify,
+   sublicense and distribute it as part of the project, and you confirm that you have
+   the right to do so. You keep authorship of your contribution.
+
+4. THIRD-PARTY COMPONENTS
+   The software uses third-party components (for example Qt, FFmpeg, Quickshell and
+   bundled themes, fonts and wallpapers). They remain under their own licences,
+   which are not changed by this one. Nothing here restricts rights that you
+   have under those licences, and the restrictions above do not apply to them.
+
+5. TERMINATION AND ENFORCEMENT
+   Your rights end automatically if you breach this licence. On termination you must
+   stop using the software and delete all copies you made outside the permitted
+   personal use. The Author may demand removal of unauthorised copies (including by
+   notice to hosting platforms) and may seek any remedy available under the law.
+   Authorship is evidenced by the Author's commit history, tags and release files.
+
+6. NO WARRANTY, NO LIABILITY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+   INCLUDING MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT.
+   IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY
+   ARISING FROM THE SOFTWARE OR ITS USE. THE SOFTWARE CAN CONTROL A COMPUTER AND SHARE
+   A SCREEN OVER A NETWORK: YOU USE IT AT YOUR OWN RISK AND ONLY WITH DEVICES THAT
+   BELONG TO YOU OR WHOSE OWNER HAS AGREED.
+
+7. OTHER LICENCES
+   For permission beyond this licence (commercial use, redistribution, packaging for
+   a distribution), contact the Author via the project repository. Permission is
+   valid only if given in writing.
+
+══════════════════════════════════════════════════════════════════════════════
+РУССКИЙ (перевод; при расхождении действует английский текст)
+══════════════════════════════════════════════════════════════════════════════
+
+1. ЧТО МОЖНО
+   Автор даёт вам личную, неисключительную, непередаваемую и отзываемую лицензию:
+   (а) читать и изучать исходный код;
+   (б) собирать программу из исходников и пользоваться ею для себя, некоммерчески,
+       на устройствах, которые принадлежат вам или находятся под вашим управлением;
+   (в) изменять свою копию для тех же личных целей;
+   (г) отправлять Автору предложения, сообщения об ошибках и правки (текстом или
+       веткой pull request внутри репозитория Автора).
+   Создавать форк или любую другую копию репозитория на площадке хостинга или где-либо
+   ещё НЕЛЬЗЯ, пока Автор не дал вам разрешение в письменной форме ДО создания копии
+   (достаточно ответа в issue или письма). Разрешённый форк существует только для цели
+   и на срок, указанные в разрешении, и обязан явно называть Автора и ссылаться на
+   исходный репозиторий.
+
+2. ЧЕГО НЕЛЬЗЯ
+   Без предварительного письменного разрешения Автора запрещено:
+   (а) копировать, делать форки, публиковать, загружать, зеркалировать и иначе
+       распространять программу или любую существенную её часть (целиком или
+       частично, в исходном или собранном виде, изменённую или нет) где бы то ни было —
+       в том числе в приватных и публичных репозиториях, архивах и файлообменниках, —
+       кроме случая с разрешением из п. 1(г);
+   (б) публиковать и распространять производные работы, форки, порты, «переписанные»
+       версии, темы и пакеты, которые содержат программу или существенные части её
+       кода либо получены из них;
+   (в) использовать программу или её часть в коммерческих целях: продавать, сдавать
+       в аренду, сублицензировать, включать в платный продукт или сервис, использовать
+       в платном или рекламном сервисе;
+   (г) выдавать программу или производные работы за свои (например, публиковать под
+       своим именем, сдавать как учебную работу, выкладывать в портфолио или на конкурс),
+       удалять и менять указания авторства, название «NameLess», логотипы, историю
+       коммитов, сведения об авторе и эту лицензию, выпускать что-либо под похожим
+       названием;
+   (д) использовать программу, её исходный код и документацию для сбора наборов данных
+       и обучения моделей машинного обучения, а также массово собирать их
+       автоматическими средствами;
+   (е) обходить технические меры защиты пользователей (например, проверки
+       сопряжения и разрешений NameLess Orbit), чтобы получить доступ к чужим
+       устройствам.
+
+3. ВКЛАД
+   Отправляя правку (код, перевод, документацию), вы даёте Автору бессрочную,
+   всемирную, безотзывную и безвозмездную лицензию использовать, изменять,
+   сублицензировать и распространять её в составе проекта и подтверждаете, что
+   имеете на это право. Авторство вклада остаётся за вами.
+
+4. СТОРОННИЕ КОМПОНЕНТЫ
+   Программа использует чужие компоненты (например, Qt, FFmpeg, Quickshell, а также
+   темы, шрифты и обои). Они остаются под своими лицензиями; эта лицензия их не
+   меняет. Ваши права по этим лицензиям не ограничиваются, а запреты выше на них не
+   распространяются.
+
+5. ПРЕКРАЩЕНИЕ И ЗАЩИТА ПРАВ
+   При нарушении лицензии ваши права прекращаются автоматически. Вы обязаны перестать
+   пользоваться программой и удалить все копии, сделанные сверх разрешённого личного
+   использования. Автор вправе требовать удаления неразрешённых копий (в том числе
+   обращением к площадкам хостинга) и использовать любые способы защиты, доступные по
+   закону. Авторство подтверждается историей коммитов, тегами и файлами релизов Автора.
+
+6. БЕЗ ГАРАНТИЙ И ОТВЕТСТВЕННОСТИ
+   ПРОГРАММА ПРЕДОСТАВЛЯЕТСЯ «КАК ЕСТЬ», БЕЗ КАКИХ-ЛИБО ГАРАНТИЙ. АВТОР НЕ НЕСЁТ
+   ОТВЕТСТВЕННОСТИ ЗА УБЫТКИ И ПРЕТЕНЗИИ, СВЯЗАННЫЕ С ПРОГРАММОЙ. ПРОГРАММА МОЖЕТ
+   УПРАВЛЯТЬ КОМПЬЮТЕРОМ И ПЕРЕДАВАТЬ ЭКРАН ПО СЕТИ: ПОЛЬЗУЙТЕСЬ ЕЮ НА СВОЙ РИСК И ТОЛЬКО
+   С УСТРОЙСТВАМИ, КОТОРЫЕ ВАМ ПРИНАДЛЕЖАТ ИЛИ ВЛАДЕЛЕЦ КОТОРЫХ СОГЛАСЕН.
+
+7. ДРУГИЕ УСЛОВИЯ
+   Для прав сверх этой лицензии (коммерческое использование, распространение,
+   упаковка для дистрибутива) обратитесь к Автору через репозиторий проекта.
+   Разрешение действительно только в письменной форме.
+

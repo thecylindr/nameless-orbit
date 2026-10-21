@@ -44,7 +44,7 @@ cd packaging/arch && makepkg -si
 
 **Android** — a ready APK is in [Releases](https://github.com/thecylindr/nameless-orbit/releases). Allow installs from that source and open the app; on first launch it offers to pick a language and asks for the notification permission. The app is called **Orbit** on Android.
 
-**With the glassrice shell** — `./install.sh orbit` in the [glassrice](https://github.com/thecylindr/glassrice) repository does everything.
+**With NameLess UI** — the shell sees a running Orbit by itself: a bar icon, the device ribbon, a tile and a widget ([nameless-ui](https://github.com/thecylindr/nameless-ui)).
 
 ## 🔄 Updating
 
@@ -94,4 +94,4 @@ See the “symptom → what to do” table at the end of the [guide](docs/USAGE.
 
 ## 📄 License
 
-[MIT](LICENSE). Contributions are welcome — [CONTRIBUTING.md](CONTRIBUTING.md).
+**NameLess Source-Available License 1.0** — [LICENSE](LICENSE). In short: you may read, build and use the code **for yourself, non-commercially**; a fork needs the author's written permission first (ask in an issue beforehand). You may not copy, fork without permission and publish the project (whole or in substantial parts), release derivative versions, use it commercially, pass it off as your own, or build datasets from the code to train models. Need more — contact the author via the repository. Third-party components (Qt, FFmpeg, Quickshell…) stay under their own licences.
