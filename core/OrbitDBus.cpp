@@ -124,6 +124,13 @@ void OrbitDBus::NotifyReply(const QString &title, const QString &body)
     m_notifications->broadcast(title, body, QStringLiteral("Claude"));      // источник «Claude» позволяет принимающей стороне отфильтровать такие сообщения
 }
 
+void OrbitDBus::NotifyCodexReply(const QString &title, const QString &body)
+{
+    if (!m_repliesAllowed || !m_repliesAllowed()) return;
+    if (!m_codexAllowed || !m_codexAllowed()) return;
+    m_notifications->broadcast(title, body, QStringLiteral("Codex"));
+}
+
 void OrbitDBus::Notify(const QString &title, const QString &body, const QString &deviceId)
 {
     if (deviceId.isEmpty()) m_notifications->broadcast(title, body, QStringLiteral("Orbit"));

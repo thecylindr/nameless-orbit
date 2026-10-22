@@ -2,20 +2,21 @@
 # Готовая (бинарная) сборка NameLess Orbit для Arch Linux: ничего не компилируется, архив берётся из релиза GitHub.
 # Сначала: packaging/make-release.sh → загрузить архив в релиз v$pkgver → вставить sha256 ниже.
 pkgname=nameless-orbit-bin
-pkgver=0.2.4
+pkgver=0.2.5
 pkgrel=1
 pkgdesc='Связь своих устройств в одной сети: файлы, буфер, уведомления, показ экрана, второй экран, звук (готовая сборка)'
 arch=('x86_64')
 url='https://github.com/thecylindr/nameless-orbit'
 license=('custom:NSAL-1.0')
 depends=('qt6-base' 'qt6-declarative' 'qt6-multimedia' 'qt6-svg' 'qt6-wayland' 'ffmpeg' 'wf-recorder' 'libpulse')
-optdepends=('hyprland: второй экран (виртуальный монитор)'
+optdepends=('python>=3.11: подключение уведомлений Codex'
+            'hyprland: второй экран (виртуальный монитор)'
             'awww: обои на втором экране'
             'opus: сжатие звука')
 provides=('nameless-orbit')
 conflicts=('nameless-orbit' 'nameless-orbit-git')
 source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/nameless-orbit-$pkgver-linux-x86_64.tar.gz")
-sha256sums=('ЗАМЕНИТЕ_НА_SHA256_ИЗ_make-release.sh')
+sha256sums=('24d8e18396100464372d69f939054d3a6440db0411e812ae0a59b1c50fe6db32')
 
 package() {
     cp -a "$srcdir/usr" "$pkgdir/usr"

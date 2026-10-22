@@ -36,11 +36,12 @@ bool VideoDecoder::feed(const QByteArray &au, bool key, qint64 ptsUs)
         m_thread = std::thread([this]() { run(); });
     }
     if (m_queue.size() >= 6) {
-        // не успеваем: накопившиеся обычные кадры бесполезны (без предыдущих они не разжимаются) — очередь сбрасывается до ключевого
-        if (!key) { m_queue.clear(); m_cv.notify_one(); return false; }
         m_queue.clear();
+        m_waitKey = true;
     }
-    m_queue.push_back({au, ptsUs});
+    if (m_waitKey && !key) return false;
+    if (key) m_waitKey = false;
+    m_queue.push_back({au, ptsUs, key});
     m_cv.notify_one();
     return true;
 #else
@@ -54,6 +55,8 @@ void VideoDecoder::stop()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         m_quit = true;
+        ++m_generation;
+        m_waitKey = true;
         m_queue.clear();
     }
     m_cv.notify_all();
@@ -65,6 +68,7 @@ void VideoDecoder::stop()
 void VideoDecoder::run()
 {
 #ifdef ORBIT_HAVE_FFMPEG
+    const quint64 generation = m_generation.load();
     const AVCodec *codec = avcodec_find_decoder(AV_CODEC_ID_H264);
     AVCodecContext *ctx = codec ? avcodec_alloc_context3(codec) : nullptr;
     AVPacket *pkt = av_packet_alloc();
@@ -91,6 +95,7 @@ void VideoDecoder::run()
                     u = std::move(m_queue.front());
                     m_queue.pop_front();
                 }
+                if (u.key) avcodec_flush_buffers(ctx); // IDR also clears references after queue loss or encoder resize.
                 if (av_new_packet(pkt, int(u.data.size())) < 0) continue;
                 std::memcpy(pkt->data, u.data.constData(), size_t(u.data.size()));
                 pkt->pts = u.pts;
@@ -120,7 +125,7 @@ void VideoDecoder::run()
                                copy(out.bits(2), out.bytesPerLine(2), frame->data[2], frame->linesize[2], ch, cw); }
                         out.unmap();
                         const qint64 pts = frame->pts;
-                        QMetaObject::invokeMethod(this, [this, out, pts]() { emit frameDecoded(out, pts); }, Qt::QueuedConnection);
+                        QMetaObject::invokeMethod(this, [this, out, pts, generation]() { if (m_generation == generation) emit frameDecoded(out, pts); }, Qt::QueuedConnection);
                     }
                     av_frame_unref(frame);
                 }

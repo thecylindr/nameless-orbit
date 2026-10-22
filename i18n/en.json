@@ -340,5 +340,10 @@
  "Ждём, пока владелец экрана разрешит показ…": "Waiting for the screen owner to allow sharing…",
  "Ожидание: ": "Waiting: ",
  "Вся клавиатура — на том компьютере · Scroll Lock — вернуть себе": "The whole keyboard goes to that computer · Scroll Lock — take it back",
- "Клавиатура снова здесь · Scroll Lock — отдать тому компьютеру": "Keyboard is back here · Scroll Lock — give it to that computer"
+ "Клавиатура снова здесь · Scroll Lock — отдать тому компьютеру": "Keyboard is back here · Scroll Lock — give it to that computer",
+    "Ответы помощников · Claude и Codex": "Assistant replies · Claude and Codex",
+    "Сообщать подключённым телефонам и компьютерам о завершении работы помощника. Claude подключается через NameLess UI, Codex — переключателем ниже.": "Notify connected phones and computers when an assistant finishes. Claude connects through NameLess UI; enable Codex below.",
+    "Сообщать о завершении ответа Codex": "Notify when Codex finishes a reply",
+    "При включении подключает Codex notify. Передаёт до 600 символов ответа; запросы и историю не отправляет. Orbit должен работать, отправка сообщений — включена.": "Enabling connects Codex notifications. Shares up to 600 characters of the reply, without prompts or history. Keep Orbit running and sending enabled.",
+    "Codex подключён. Перезапустите активные сессии Codex.": "Codex connected. Restart active Codex sessions."
 }

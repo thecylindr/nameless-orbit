@@ -34,6 +34,7 @@ public:
               NotificationsPlugin *notifications, SharePlugin *share, RunCommandPlugin *runCommand, QObject *parent = nullptr);
 
     void setRepliesGate(std::function<bool()> gate) { m_repliesAllowed = std::move(gate); }
+    void setCodexGate(std::function<bool()> gate) { m_codexAllowed = std::move(gate); }
     void setCrossing(EdgeCrossing *crossing);
     bool registerOnBus();                 // false — имя занято или шины нет (Orbit при этом работает дальше)
     QByteArray statusJson() const;        // тот же JSON отдаёт и канал SingleInstance
@@ -56,6 +57,7 @@ public slots:
     void Notify(const QString &title, const QString &body, const QString &deviceId);
     // сообщение об ответе Claude (закончил / ждёт ответа) на все подключённые устройства; уходит, только если это не выключено в настройках Orbit
     void NotifyReply(const QString &title, const QString &body);
+    void NotifyCodexReply(const QString &title, const QString &body);
     // экран устройства: смотреть его (запрос показа и окно просмотра) или показать ему свой; выполняет главный код — через сигнал screenRequested
     void ViewScreen(const QString &deviceId) { emit screenRequested(deviceId, true); }
     void ShareScreen(const QString &deviceId) { emit screenRequested(deviceId, false); }
@@ -85,6 +87,7 @@ private:
     RunCommandPlugin *m_run;
     EdgeCrossing *m_crossing = nullptr;
     std::function<bool()> m_repliesAllowed;
+    std::function<bool()> m_codexAllowed;
 };
 
 #endif // ORBITDBUS_H

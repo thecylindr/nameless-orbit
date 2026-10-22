@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(nameless-orbit VERSION 0.2.4 LANGUAGES CXX)
+project(nameless-orbit VERSION 0.2.5 LANGUAGES CXX)
 add_compile_definitions(APP_VERSION_STR="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -40,6 +40,7 @@ qt_add_executable(nameless-orbit
     core/Peer.cpp
     core/Discovery.cpp
     core/PeerManager.cpp
+    core/CodexNotify.cpp
     core/SettingsManager.cpp
     core/CommandStore.cpp
     core/OrbitDBus.cpp
@@ -65,6 +66,8 @@ qt_add_executable(nameless-orbit
     remote/AudioStream.cpp
     remote/VirtualDisplay.cpp
 )
+
+qt_add_resources(nameless-orbit codex_setup PREFIX "/orbit" FILES packaging/configure-codex.py)
 
 if(WIN32)
     target_sources(nameless-orbit PRIVATE appicon/app.rc)
@@ -132,7 +135,7 @@ endif()
 
 # Android: свой манифест (разрешения для сети, вибрации, уведомлений) на основе шаблона Qt
 if(ANDROID)
-    # код версии растёт вместе с версией проекта (0.2.4 → 204): Android ставит новый APK поверх старого только при большем коде
+    # код версии растёт вместе с версией проекта (0.2.5 → 204): Android ставит новый APK поверх старого только при большем коде
     math(EXPR ORBIT_VERSION_CODE "${PROJECT_VERSION_MAJOR} * 10000 + ${PROJECT_VERSION_MINOR} * 100 + ${PROJECT_VERSION_PATCH}")
     set_target_properties(nameless-orbit PROPERTIES
         QT_ANDROID_VERSION_NAME ${PROJECT_VERSION}
@@ -174,4 +177,18 @@ endif()
 if(UNIX AND NOT APPLE)
     install(FILES packaging/nameless-orbit.desktop DESTINATION share/applications)
     install(FILES appicon/appicon-256.png DESTINATION share/icons/hicolor/256x256/apps RENAME nameless-orbit.png)
+endif()
+
+option(ORBIT_BUILD_TESTS "Build streaming regression tests" OFF)
+if(ORBIT_BUILD_TESTS AND NOT ANDROID)
+    enable_testing()
+    add_executable(orbit-h264-stream-test tests/h264-stream.cpp)
+    target_link_libraries(orbit-h264-stream-test PRIVATE Qt6::Core)
+    add_test(NAME h264-stream-boundaries COMMAND orbit-h264-stream-test)
+    if(LIBAV_FOUND)
+        add_executable(orbit-video-decoder-test tests/video-decoder.cpp remote/VideoDecoder.cpp remote/VideoDecoder.h)
+        target_compile_definitions(orbit-video-decoder-test PRIVATE ORBIT_HAVE_FFMPEG)
+        target_link_libraries(orbit-video-decoder-test PRIVATE Qt6::Core Qt6::Multimedia PkgConfig::LIBAV)
+        add_test(NAME video-decoder-recovery COMMAND orbit-video-decoder-test)
+    endif()
 endif()

@@ -1,7 +1,7 @@
 // NameLess Orbit — связь между своими устройствами в локальной сети: обнаружение, сопряжение, буфер обмена,
 // уведомления, батарея, медиа, команды, демонстрация и управление экраном. Подробно — в README.md.
 #ifndef APP_VERSION_STR
-#define APP_VERSION_STR "0.2.4"
+#define APP_VERSION_STR "0.2.5"
 #endif
 
 #include <QGuiApplication>
@@ -18,6 +18,9 @@
 #include "core/SettingsManager.h"
 #include "core/CommandStore.h"
 #include "core/SingleInstance.h"
+#include "core/CodexNotify.h"
+#include <QJsonDocument>
+#include <QJsonObject>
 #include "core/ThemeManager.h"
 #include "core/Localizer.h"
 #include "core/OrbitDBus.h"
@@ -50,6 +53,7 @@ QIcon appIcon()
 
 int main(int argc, char *argv[])
 {
+    if (argc > 1 && QByteArray(argv[1]) == "--codex-notify") return runCodexNotify(argc, argv);
     QGuiApplication app(argc, argv);
 #if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
     if (HyprIpc::recoverSignature()) qInfo() << "Orbit: переменная HYPRLAND_INSTANCE_SIGNATURE не была задана — Hyprland найден по сокету в" << qgetenv("XDG_RUNTIME_DIR") + "/hypr";
@@ -73,7 +77,6 @@ int main(int argc, char *argv[])
     Identity identity;
     TrustStore trustStore;
     PeerManager peerManager(&identity, &trustStore);
-    VirtualDisplay::cleanupStale();      // виртуальный монитор «второго экрана» мог остаться от прошлого запуска (Orbit упал)
     if (VirtualDisplay::backend() != VirtualDisplay::Backend::None) peerManager.addLocalCapability(QStringLiteral("secondScreen"));      // другие устройства видят, что здесь можно создать второй экран
     SettingsManager settings;
     CommandStore commandStore;
@@ -83,7 +86,15 @@ int main(int argc, char *argv[])
     OrbitDBus *dbus = nullptr;
 
     SingleInstance instance(instanceName);
-    instance.setHandler([&peerManager, &dbus](const QByteArray &cmd) -> QByteArray {
+    instance.setHandler([&peerManager, &dbus, &settings](const QByteArray &cmd) -> QByteArray {
+        if (cmd.startsWith('{')) {
+            const auto request = QJsonDocument::fromJson(cmd).object();
+            if (request.value(QStringLiteral("command")).toString() == QLatin1String("codexReply") && dbus) {
+                if (settings.sendReplies() && settings.sendCodexReplies())
+                    dbus->NotifyCodexReply(QStringLiteral("Codex завершил ответ"), request.value(QStringLiteral("body")).toString().left(600));
+                return QByteArrayLiteral("{\"ok\":true}");
+            }
+        }
         if (cmd == "ping") return QByteArrayLiteral("{\"ok\":true}");
         if (cmd == "status" || cmd == "show" || cmd == "scan" || cmd == "enable" || cmd == "disable") {
             if (cmd == "scan") peerManager.refresh();
@@ -100,8 +111,13 @@ int main(int argc, char *argv[])
         qInfo() << "[main] NameLess Orbit уже запущен";
         return 0;
     }
-    if (!instance.listen())
-        qWarning() << "[main] не удалось занять канал единственного экземпляра — команды status/scan извне не дойдут";
+    if (!instance.listen()) {
+        qWarning() << "[main] не удалось занять канал единственного экземпляра";
+        return 1;
+    }
+
+    // Only the primary instance may remove an orphaned virtual output.
+    VirtualDisplay::cleanupStale();
 
     if (settings.discoveryOnStart()) peerManager.setDiscoveryActive(true);
     peerManager.setIntroProvider([&commandStore]() { return commandStore.commandsForQml(); });     // список быстрых команд для знакомства при сопряжении
@@ -167,6 +183,7 @@ int main(int argc, char *argv[])
     // D-Bus для NameLess UI и скриптов; нет шины или имя занято — Orbit работает без неё
     OrbitDBus orbitDBus(&peerManager, &batteryPlugin, &findDevicePlugin, &clipboardPlugin, &notificationsPlugin, &sharePlugin, &runCommandPlugin);
     orbitDBus.setRepliesGate([&settings]() { return settings.sendReplies(); });
+    orbitDBus.setCodexGate([&settings]() { return settings.sendCodexReplies(); });
     dbus = &orbitDBus;
 #ifdef ORBIT_DESKTOP_LINUX
     // имя на шине может быть ещё занято (прежний Orbit завершается) или шина не готова при входе в сессию: повтор каждые 5 с —
@@ -244,7 +261,7 @@ int main(int argc, char *argv[])
     // «Показать» из D-Bus и повторного запуска: развернуть и вынести окно вперёд
     QObject::connect(&notificationsPlugin, &NotificationsPlugin::notificationReceived, &app,
                      [&settings](const QString &, const QString &from, const QString &title, const QString &body, const QString &app) {
-        if (app == QLatin1String("Claude") && !settings.receiveReplies()) return;      // человек выключил сообщения об ответе Claude
+        if ((app == QLatin1String("Claude") || app == QLatin1String("Codex")) && !settings.receiveReplies()) return;      // человек выключил сообщения об ответе Claude
         PlatformBridge::postNotification(from + QStringLiteral(": ") + title, body);
     });
     // запросы, на которые должен ответить человек, приходят в диалог окна: если окно закрыто (работа в фоне), оно выходит вперёд само

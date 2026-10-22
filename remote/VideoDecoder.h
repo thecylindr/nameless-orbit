@@ -31,7 +31,7 @@ signals:
     void failed(const QString &reason);
 
 private:
-    struct Unit { QByteArray data; qint64 pts; };
+    struct Unit { QByteArray data; qint64 pts; bool key; };
     void run();
 
     std::thread m_thread;
@@ -39,6 +39,8 @@ private:
     std::condition_variable m_cv;
     std::deque<Unit> m_queue;
     std::atomic<bool> m_quit{false};
+    bool m_waitKey = true;
+    std::atomic<quint64> m_generation{0};
     bool m_started = false;          // получен ключевой кадр, поток разжатия работает
     bool m_reported = false;
 };

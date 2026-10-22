@@ -23,6 +23,7 @@ class SettingsManager : public QObject
     Q_PROPERTY(int streamQuality READ streamQuality WRITE setStreamQuality NOTIFY streamChanged)
     Q_PROPERTY(int streamWidth READ streamWidth WRITE setStreamWidth NOTIFY streamChanged)
     Q_PROPERTY(bool sendReplies READ sendReplies WRITE setSendReplies NOTIFY repliesChanged)         // отправлять на устройства сообщение об ответе Claude («закончил», «ждёт ответа»)
+    Q_PROPERTY(bool sendCodexReplies READ sendCodexReplies WRITE setSendCodexReplies NOTIFY repliesChanged)
     Q_PROPERTY(bool receiveReplies READ receiveReplies WRITE setReceiveReplies NOTIFY repliesChanged)   // показывать такие сообщения, пришедшие от других устройств
     Q_PROPERTY(QString streamFormat READ streamFormat WRITE setStreamFormat NOTIFY streamChanged)   // что хочет получать этот зритель: auto, h264, tiles, jpeg
     Q_PROPERTY(QString secondAnchor READ secondAnchor WRITE setSecondAnchor NOTIFY secondChanged)    // у какого монитора ставится второй экран: пусто — у того, где курсор/фокус, иначе имя (eDP-1)
@@ -64,6 +65,9 @@ public:
     bool streamAuto() const { return m_settings.value(QStringLiteral("streamAuto"), true).toBool(); }
     bool sendReplies() const { return m_settings.value(QStringLiteral("sendReplies"), true).toBool(); }
     void setSendReplies(bool v) { m_settings.setValue(QStringLiteral("sendReplies"), v); emit repliesChanged(); }
+    Q_INVOKABLE QString configureCodexNotifications();
+    bool sendCodexReplies() const { return m_settings.value(QStringLiteral("sendCodexReplies"), false).toBool(); }
+    void setSendCodexReplies(bool v) { m_settings.setValue(QStringLiteral("sendCodexReplies"), v); emit repliesChanged(); }
     bool receiveReplies() const { return m_settings.value(QStringLiteral("receiveReplies"), true).toBool(); }
     void setReceiveReplies(bool v) { m_settings.setValue(QStringLiteral("receiveReplies"), v); emit repliesChanged(); }
     QString streamFormat() const { const QString v = m_settings.value(QStringLiteral("streamFormat"), QStringLiteral("auto")).toString(); return v == QLatin1String("h264") || v == QLatin1String("tiles") || v == QLatin1String("jpeg") ? v : QStringLiteral("auto"); }

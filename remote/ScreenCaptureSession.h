@@ -164,7 +164,6 @@ private:
     qint64 m_lastEmitMs = 0;                                 // когда ушло последнее обновление: частые подряд — «черновик» с пониженным качеством
     QByteArray m_lastJpeg;                                   // прошлый отправленный JPEG: точные повторы пропускаются
     qint64 m_wfStartMs = 0;
-    QTimer m_vidFlush;                                       // дослать последний кадр, если следующий не пришёл (тишина на экране)
     void startQtCapture();
 
     QScreen *pickScreen() const;

@@ -1,5 +1,6 @@
 #include "ScreenCaptureSession.h"
 #include "HyprIpc.h"
+#include "H264Stream.h"
 #include "VirtualDisplay.h"
 #include <QVideoFrame>
 #include <QImage>
@@ -31,6 +32,12 @@
 
 ScreenCaptureSession::ScreenCaptureSession(QObject *parent) : QObject(parent)
 {
+    connect(qGuiApp, &QGuiApplication::screenRemoved, this, [this](QScreen *screen) {
+        if (isActive() && !m_screenName.isEmpty() && screen->name() == m_screenName) {
+            stop();
+            emit sourceLost();
+        }
+    });
     m_pool.setMaxThreadCount(1);       // сжатие идёт строго по очереди
     m_session.setScreenCapture(&m_capture);
     m_session.setVideoSink(&m_sink);
@@ -40,17 +47,6 @@ ScreenCaptureSession::ScreenCaptureSession(QObject *parent) : QObject(parent)
         m_errorString = msg;
         emit errorChanged();
         qWarning() << "ScreenCaptureSession:" << msg;
-    });
-    m_vidFlush.setSingleShot(true);
-    m_vidFlush.setInterval(4);
-    // кодер отдаёт кадр одной записью; если за 4 мс после чтения новых данных нет — кадр закончился: уходит сразу, не ожидая начала следующего
-    // (иначе каждый кадр задерживался бы ещё на один интервал кадров)
-    connect(&m_vidFlush, &QTimer::timeout, this, [this]() {
-        if (!m_video || m_wfBuf.size() < 8) return;
-        if (m_wf && m_wf->bytesAvailable() > 0) { onVideoData(); return; }      // продолжение кадра уже пришло — сначала оно (кадр режется по концу данных, не по таймеру)
-        const QByteArray au = m_wfBuf;
-        m_wfBuf.clear();
-        emitVideoUnit(au);
     });
     m_refineTimer.setSingleShot(true);
     m_refineTimer.setInterval(450);
@@ -65,7 +61,7 @@ ScreenCaptureSession::ScreenCaptureSession(QObject *parent) : QObject(parent)
 
 bool ScreenCaptureSession::isActive() const { return m_wfActive || m_capture.isActive(); }
 
-void ScreenCaptureSession::setTargetFps(int fps) { fps = qBound(1, fps, 60); if (fps != m_targetFps) { m_targetFps = fps; emit targetFpsChanged(); if (m_wfActive && (m_video ? qAbs(fps - m_wfFps) >= 12 : fps > m_wfFps)) scheduleTuneRestart(); } }
+void ScreenCaptureSession::setTargetFps(int fps) { fps = qBound(1, fps, 60); if (fps != m_targetFps) { m_targetFps = fps; emit targetFpsChanged(); if (m_wfActive && (m_video ? qAbs(fps - m_wfFps) >= 4 : fps > m_wfFps)) scheduleTuneRestart(); } }
 void ScreenCaptureSession::setJpegQuality(int q) { q = qBound(10, q, 95); if (q != m_jpegQuality) { m_jpegQuality = q; emit jpegQualityChanged(); if (m_wfActive && !m_raw && qAbs(q - m_wfQuality) >= (m_video ? 10 : 5)) scheduleTuneRestart(); } }
 void ScreenCaptureSession::setMaxWidth(int w) { w = qBound(320, w, 3840); if (w != m_maxWidth) { m_maxWidth = w; emit maxWidthChanged(); if (m_wfActive && qAbs(w - m_wfWidth) * 100 > m_wfWidth * 15) scheduleTuneRestart(); } }
 
@@ -135,8 +131,23 @@ void ScreenCaptureSession::start()
     startQtCapture();
 }
 
+QScreen *ScreenCaptureSession::pickScreen() const
+{
+    if (!m_screenName.isEmpty())
+        for (QScreen *s : QGuiApplication::screens()) if (s->name() == m_screenName) return s;
+    if (!m_screenName.isEmpty() && !windowSource()) return nullptr;
+    return QGuiApplication::primaryScreen();
+}
+
 void ScreenCaptureSession::startQtCapture()
 {
+    if (virtualSource()) {
+        m_errorString = QStringLiteral("Не удалось запустить захват виртуального монитора: проверьте wf-recorder и видеокодер");
+        emit errorChanged();
+        emit sourceLost();
+        return;
+    }
+    if (QScreen *screen = pickScreen()) m_capture.setScreen(screen);
     log(QStringLiteral("Снимаю экран средствами Qt (JPEG): wf-recorder недоступен или не сработал (видео H.264 было %1)").arg(m_wantVideo ? QStringLiteral("запрошено") : QStringLiteral("не запрошено")));
     // без заданного экрана берётся основной; на Wayland запрос и покажет системный выбор, какой именно делиться
     m_capture.start();
@@ -256,19 +267,16 @@ void ScreenCaptureSession::scheduleTuneRestart()
     scheduleWfRestart(int(qMax<qint64>(1200, wait)));
 }
 
-QScreen *ScreenCaptureSession::pickScreen() const
-{
-    if (!m_screenName.isEmpty())
-        for (QScreen *s : QGuiApplication::screens()) if (s->name() == m_screenName) return s;
-    return QGuiApplication::primaryScreen();
-}
 
 void ScreenCaptureSession::startWf()
 {
     m_wfStartedMs = QDateTime::currentMSecsSinceEpoch();
     const bool virt = virtualSource() && m_virtualSize.isValid();
     QScreen *scr = virt ? nullptr : pickScreen();
-    if (!scr && !virt) { startQtCapture(); return; }
+    if (!scr && !virt) {
+        if (!m_screenName.isEmpty() && !windowSource()) { emit sourceLost(); return; }
+        startQtCapture(); return;
+    }
     const double screenDpr = scr ? scr->devicePixelRatio() : 1.0;
 
     m_wfStartMs = QDateTime::currentMSecsSinceEpoch();
@@ -292,8 +300,8 @@ void ScreenCaptureSession::startWf()
         m_winRect = base;
         m_winTimer.start();
     } else {
-        // у виртуального монитора кадров по повреждениям нет, пока на нём ничего не меняется, — снимаем непрерывно (-D)
-        if (virt) args << QStringLiteral("-D");
+        // Видео читается строго до следующего AUD. Непрерывный захват (-D) гарантирует границу даже на неподвижном экране.
+        if (virt || m_wantVideo) args << QStringLiteral("-D");
         args << QStringLiteral("-o") << (virt ? m_screenName : scr->name());
         m_winTimer.stop();
     }
@@ -352,11 +360,11 @@ void ScreenCaptureSession::startWf()
         // потолок скорости — по площади кадра (кбит/с): ~14 Мбит/с на 1080p, у высокого экрана — больше, у маленького окна — меньше
         const double outW = qMin(m_wfWidth, int(capRect.width() * screenDpr)), outH = outW * capRect.height() / qMax(1, capRect.width());
         const int maxRate = qBound(3000, int(14000.0 * outW * outH / (1920.0 * 1080.0)), 40000);
-        const int gop = qMax(15, m_wfFps);
+        const int gop = virt ? qMax(12, m_wfFps / 2) : qMax(15, m_wfFps);
         args << QStringLiteral("-c") << QStringLiteral("libx264") << QStringLiteral("-m") << QStringLiteral("h264")
              << QStringLiteral("-r") << QString::number(m_wfFps)
              << QStringLiteral("-x") << QStringLiteral("yuv420p")
-             << QStringLiteral("-F") << QStringLiteral("scale=w='min(%1,iw)':h=-2").arg(m_wfWidth)
+             << QStringLiteral("-F") << QStringLiteral("scale=w='trunc(min(%1,iw)/2)*2':h=-2:flags=lanczos").arg(m_wfWidth)
              << QStringLiteral("-p") << QStringLiteral("preset=ultrafast")
              << QStringLiteral("-p") << QStringLiteral("tune=zerolatency")
              << QStringLiteral("-p") << QStringLiteral("crf=%1").arg(crf)
@@ -572,33 +580,13 @@ bool spsSize(const QByteArray &nal, int *w, int *h)
     return true;
 }
 
-// позиция начала AUD (00 00 01 09; 4-байтный код — на байт раньше) начиная с from; -1 — нет
-int findAud(const QByteArray &b, int from)
-{
-    for (;;) {
-        const int p = b.indexOf(QByteArrayLiteral("\x00\x00\x01"), from);
-        if (p < 0 || p + 3 >= b.size()) return -1;
-        if ((uchar(b[p + 3]) & 0x1F) == 9) return (p > 0 && b[p - 1] == 0) ? p - 1 : p;
-        from = p + 3;
-    }
-}
+
 }
 
 void ScreenCaptureSession::onVideoData()
 {
     m_wfBuf += m_wf->readAllStandardOutput();
-    m_vidFlush.start();
-    int first = findAud(m_wfBuf, 0);
-    if (first < 0) { if (m_wfBuf.size() > 4 * 1024 * 1024) m_wfBuf.clear(); return; }
-    if (first > 0) { m_wfBuf.remove(0, first); }
-    for (;;) {
-        const int next = findAud(m_wfBuf, 5);
-        if (next < 0) break;
-        const QByteArray au = m_wfBuf.left(next);
-        m_wfBuf.remove(0, next);
-        emitVideoUnit(au);
-    }
-    if (m_wfBuf.size() > 8 * 1024 * 1024) m_wfBuf.clear();
+    for (const auto &au : H264Stream::takeComplete(m_wfBuf)) emitVideoUnit(au);
 }
 
 void ScreenCaptureSession::emitVideoUnit(const QByteArray &au)
@@ -865,7 +853,7 @@ bool ScreenCaptureSession::submitImage(const QImage &image, const QSize &sourceS
             cur = image.copy(r.intersected(image.rect()));
         }
         if (cur.width() > maxW)
-            cur = cur.scaledToWidth(maxW, cur.width() > maxW * 2 ? Qt::FastTransformation : Qt::SmoothTransformation);
+            cur = cur.scaledToWidth(maxW, Qt::SmoothTransformation);
         if (cur.format() != QImage::Format_RGB32) cur = cur.convertToFormat(QImage::Format_RGB32);
         const int W = cur.width(), H = cur.height();
 

@@ -17,7 +17,8 @@ public class OrbitVideoDecoder {
     private static final String TAG = "OrbitVideo";
     private static final Object lock = new Object();
 
-    private static MediaCodec codec;
+    private static volatile MediaCodec codec;
+    private static boolean waitingForKey = true;
     private static Thread outThread;
     private static volatile boolean running = false;
     private static int curW = 0, curH = 0;
@@ -38,17 +39,19 @@ public class OrbitVideoDecoder {
                 if (!key) return false;                  // начинать можно только с ключевого кадра (в нём SPS/PPS)
                 if (!start(w, h)) { fail(lastError); return false; }
             }
+            if (waitingForKey && !key) return false;
             // декодер молчит уже давно после того, как ему отдали кадры — аппаратный путь на этом телефоне не работает
             final long now = System.currentTimeMillis();
             if (lastOutputMs == 0 && startedMs != 0 && now - startedMs > 3000) { fail("декодер не выдал ни одного кадра за 3 с (подано кадров: " + fed + ")"); return false; }
             try {
                 int idx = codec.dequeueInputBuffer(4000);
-                if (idx < 0) return false;
+                if (idx < 0) { waitingForKey = true; return false; }
                 ByteBuffer in = codec.getInputBuffer(idx);
-                if (in == null || in.capacity() < au.length) { codec.queueInputBuffer(idx, 0, 0, ptsUs, 0); return false; }
+                if (in == null || in.capacity() < au.length) { codec.queueInputBuffer(idx, 0, 0, ptsUs, 0); waitingForKey = true; return false; }
                 in.clear();
                 in.put(au);
                 codec.queueInputBuffer(idx, 0, au.length, ptsUs, 0);
+                waitingForKey = false;
                 ++fed;
                 return true;
             } catch (Exception e) {
@@ -110,6 +113,7 @@ public class OrbitVideoDecoder {
             codec.start();
 
             curW = w; curH = h;
+            waitingForKey = true;
             lastOutputMs = 0;
             startedMs = System.currentTimeMillis();
             running = true;
@@ -128,7 +132,7 @@ public class OrbitVideoDecoder {
                                 Image img = null;
                                 try {
                                     img = c.getOutputImage(i);
-                                    if (img != null) {
+                                    if (img != null && running && c == codec) {
                                         Image.Plane[] p = img.getPlanes();
                                         lastOutputMs = System.currentTimeMillis();
                                         nativeFrame(p[0].getBuffer(), p[1].getBuffer(), p[2].getBuffer(), img.getWidth(), img.getHeight(),

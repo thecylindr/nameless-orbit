@@ -6,6 +6,7 @@ import "common" as Common
 Page {
     id: page
     signal back
+    property string codexSetupMessage: ""
     property bool notifOk: Settings.notificationsAllowed()
     // после возврата из системных настроек состояние перечитывается
     Connections { target: Qt.application; function onStateChanged() { page.notifOk = Settings.notificationsAllowed(); } }
@@ -77,13 +78,32 @@ Page {
             }
 
             // сообщения об ответе Claude: «закончил работу», «ждёт ответа»
-            Block { title: qsTr("Сообщения об ответе Claude")
+            Block { title: qsTr("Ответы помощников · Claude и Codex")
                 Common.GlassSwitch {
                     visible: !IsMobile
                     width: parent.width
                     label: qsTr("Отправлять на устройства")
-                    sub: qsTr("Когда Claude Code закончил работу или ждёт вашего ответа, подключённые телефоны и компьютеры получают короткое сообщение (его формирует NameLess UI)")
+                    sub: qsTr("Сообщать подключённым телефонам и компьютерам о завершении работы помощника. Claude подключается через NameLess UI, Codex — переключателем ниже.")
                     checked: Settings.sendReplies; onToggled: v => Settings.sendReplies = v
+                }
+                Common.GlassSwitch {
+                    visible: !IsMobile
+                    width: parent.width
+                    label: qsTr("Сообщать о завершении ответа Codex")
+                    sub: qsTr("При включении подключает Codex notify. Передаёт до 600 символов ответа; запросы и историю не отправляет. Orbit должен работать, отправка сообщений — включена.")
+                    checked: Settings.sendCodexReplies
+                    onToggled: v => {
+                        if (!v) { Settings.sendCodexReplies = false; page.codexSetupMessage = ""; return; }
+                        var error = Settings.configureCodexNotifications();
+                        Settings.sendCodexReplies = error === "";
+                        page.codexSetupMessage = error || qsTr("Codex подключён. Перезапустите активные сессии Codex.");
+                    }
+                }
+                Text {
+                    visible: page.codexSetupMessage !== ""
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: page.codexSetupMessage
+                    color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 12
                 }
                 Common.GlassSwitch {
                     width: parent.width
@@ -333,7 +353,7 @@ Text { visible: RemoteDesktop.secondBackend === "Hyprland"; text: qsTr("Рядо
                 Flow {
                     width: parent.width; spacing: 8
                     Repeater {
-                        model: [[0, qsTr("По окну зрителя")], [1280, "1280"], [1600, "1600"], [1920, "1920"], [2560, "2560"]]
+                        model: [[0, qsTr("По окну зрителя")], [1280, "1280"], [1600, "1600"], [1920, "1920"], [2560, "2560"], [3840, "3840"]]
                         Common.GlassButton {
                             required property var modelData
                             text: modelData[1]; primary: Settings.streamWidth === modelData[0]

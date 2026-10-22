@@ -34,7 +34,7 @@ constexpr Level kLevels[] = {{1.00, 78, 45}, {1.00, 74, 36}, {1.00, 68, 30}, {1.
 // Лесенка видео: частота меняется мелкими шагами (60 → 48 → 36 → 30 → 24 → 20 → 15 → 12 → 8), размер и качество — лишь с четвёртой ступени.
 // crfAdd — на сколько ухудшается сжатие (одна единица — около четырёх процентов качества)
 struct VLevel { int fps; double scale; int crfAdd; };
-constexpr VLevel kVideo[] = {{60, 1.00, 0}, {48, 1.00, 1}, {36, 1.00, 2}, {30, 1.00, 3}, {24, 0.90, 4}, {20, 0.80, 6}, {15, 0.70, 8}, {12, 0.55, 10}, {8, 0.45, 12}};
+constexpr VLevel kVideo[] = {{60, 1.00, 0}, {48, 1.00, 0}, {36, 1.00, 0}, {30, 1.00, 1}, {24, 0.90, 4}, {20, 0.80, 6}, {15, 0.70, 8}, {12, 0.55, 10}, {8, 0.45, 12}};
 constexpr int kVideoLevelCount = int(sizeof(kVideo) / sizeof(kVideo[0]));
 constexpr int kMaxDecoders = 3;
 constexpr int kLevelCount = int(sizeof(kLevels) / sizeof(kLevels[0]));
@@ -92,7 +92,7 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
     connect(m_decoder, &VideoDecoder::frameDecoded, this, [this](const QVideoFrame &f, qint64 pts) { onVideoFrame(f, pts); });
     connect(m_decoder, &VideoDecoder::failed, this, [this](const QString &why) { onVideoFailed(why); });
     connect(&m_capture, &ScreenCaptureSession::sourceLost, this, [this]() {
-        emit errorOccurred(QStringLiteral("Показываемое окно закрыто — показ остановлен"));
+        emit errorOccurred(QStringLiteral("Источник экрана недоступен — показ остановлен"));
         stopSharing();
     });
     connect(&m_capture, &ScreenCaptureSession::errorChanged, this, &RemoteDesktopController::onCaptureError);
@@ -367,11 +367,12 @@ void RemoteDesktopController::applyLevel()
     static const int qualityDrop[] = {0, 4, 10, 16, 20, 24, 28, 32};
     // у «второго экрана» частота и ширина кадра — те, что попросил зритель (полное разрешение монитора), а не общие настройки показа
     const int fpsCap = m_ssFps > 0 ? m_ssFps : m_settings->streamFps(), qualityCap = m_settings->streamQuality(), widthCap = m_ssWidth > 0 ? m_ssWidth : m_settings->streamWidth();
-    // ширина: задана явно — она; иначе по окну зрителя (нет данных — 1600), но не больше 1920 и не меньше 800
-    const int base = widthCap > 0 ? widthCap : qBound(800, m_viewerWidth > 0 ? m_viewerWidth : 1600, 1920);
+    // ширина: задана явно — она; иначе по окну зрителя (нет данных — 1600), но не больше 3840 и не меньше 800
+    const int base = widthCap > 0 ? widthCap : qBound(800, m_viewerWidth > 0 ? m_viewerWidth : 1600, 3840);
 
     // зритель разжимает один кадр за m_peerDecodeMs: слать чаще — только забивать ему очередь (задержка и «моргание»)
     const int decodeFpsCap = m_peerDecodeMs > 0 ? qMax(5, int(1000.0 / (m_peerDecodeMs * 1.25))) : 60;
+    m_extBitrateKbps = qBound(3000, qualityCap * 160, 16000);
     if (!m_settings->streamAuto()) {                       // ручной режим: значения неизменны
         m_capture.setMaxWidth(base);
         m_capture.setJpegQuality(qualityCap);
@@ -387,14 +388,15 @@ void RemoteDesktopController::applyLevel()
         m_capture.setJpegQuality(qMax(30, qualityCap - vl.crfAdd * (monitor ? 2 : 4)));
         static const int kExtKbps[] = {9000, 7500, 6000, 5000, 4000, 3200, 2500, 1800, 1200};       // скорость кодера телефона по ступеням лесенки
         m_extBitrateKbps = kExtKbps[qBound(0, m_level, kVideoLevelCount - 1)] * qBound(30, qualityCap, 95) / 75;
-        int vfps = qMin(fpsCap, vl.fps);
+        int vfps = qMin(decodeFpsCap, qMin(fpsCap, vl.fps));
         if (m_encCeilUntil > nowMs()) vfps = qMin(vfps, m_encCeilFps);
         m_capture.setTargetFps(qBound(8, vfps, 60));
         return;
     }
     const int lv = qBound(0, m_level, kLevelCount - 1);
-    m_capture.setMaxWidth(qMax(640, int(base * kLevels[lv].scale)));
-    m_capture.setJpegQuality(qMax(30, qualityCap - qualityDrop[lv]));
+    const bool monitor = m_ssFps > 0;
+    m_capture.setMaxWidth(qMax(640, int(base * (monitor ? 1.0 : kLevels[lv].scale))));
+    m_capture.setJpegQuality(qMax(monitor ? qMin(60, qualityCap) : 30, qualityCap - qualityDrop[lv] / (monitor ? 2 : 1)));
     m_capture.setTargetFps(qMin(decodeFpsCap, qMax(5, int(fpsCap * fpsFactor[lv] + 0.5))));
 }
 
@@ -535,8 +537,10 @@ void RemoteDesktopController::requestSecondScreen(const QString &deviceId, const
     const QString res = spec.value(QStringLiteral("res"), QStringLiteral("native")).toString();
     if (res == QLatin1String("1080") && s > 1080) { s = 1080; l = int(s * aspect); }
     if (res == QLatin1String("720") && s > 720) { s = 720; l = int(s * aspect); }
-    if (l > 2560) { l = 2560; s = int(l / aspect); }
-    if (s > 1600) { s = 1600; l = int(s * aspect); }
+    const int maxLong = landscape ? 3840 : 2400;
+    const int maxShort = landscape ? 2400 : 3840;
+    if (l > maxLong) { l = maxLong; s = int(l / aspect); }
+    if (s > maxShort) { s = maxShort; l = int(s * aspect); }
     l -= l % 12; s -= s % 12;                                  // кратно 12: на такой размер делятся нацело масштабы 1,5 и 2 (иначе Hyprland подставит свой)
     SecondSpec ss;
     ss.w = landscape ? l : s; ss.h = landscape ? s : l;
@@ -608,7 +612,7 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
     if (it == m_ssPending.constEnd()) return;
     const SecondSpec spec = it.value();
     m_ssPending.remove(deviceId);
-    if (!m_sharingTo.isEmpty() && m_sharingTo != deviceId) stopSharing();          // иначе остановка потом снесла бы новый монитор
+    if (!m_sharingTo.isEmpty()) stopSharing(); // Stop the previous session before creating or replacing its output.
     QString source, err;
     m_ssMirror = false;
     if (VirtualDisplay::backend() == VirtualDisplay::Backend::Hyprland && spec.mode == QLatin1String("mirror")) {
@@ -658,6 +662,7 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
 void RemoteDesktopController::releaseSecondScreen()
 {
     m_ssKeep.stop();
+    if (m_ssFps > 0) m_capture.stop();
     if (!m_ssOutput.isEmpty()) { VirtualDisplay::destroy(m_ssOutput); m_ssOutput.clear(); }
     if (m_ssFps > 0) { m_capture.setScreenName(QString()); m_capture.setVirtualSize(QSize()); m_input.setTarget(QString()); }
     m_ssFps = 0; m_ssWidth = 0; m_ssMirror = false;
@@ -1224,6 +1229,7 @@ void RemoteDesktopController::handleMessage(const QString &deviceId, const QJson
             m_graceFor.clear(); m_graceTimer.stop();
             m_sendSeq = 0; m_ackedSeq = 0; m_lastAckMs = nowMs(); m_sentAt.clear();
             m_capture.requestKeyFrame();
+            if (m_ssFps > 0) armInput(deviceId, true);
             applyLevel();
             QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("shareAccepted");
             sendToPeer(deviceId, p);

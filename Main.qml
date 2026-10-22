@@ -147,7 +147,7 @@ ApplicationWindow {
     }
     Connections {
         target: Notifications
-        function onNotificationReceived(deviceId, fromName, title, body, appName) { if (appName === "Claude" && !Settings.receiveReplies) return; toast.show(fromName + ": " + title); }
+        function onNotificationReceived(deviceId, fromName, title, body, appName) { if ((appName === "Claude" || appName === "Codex") && !Settings.receiveReplies) return; toast.show(fromName + ": " + title); }
     }
     // просмотр начат не со страницы устройства (например, из Nameless UI по D-Bus) — страница просмотра открывается сама
     Connections {

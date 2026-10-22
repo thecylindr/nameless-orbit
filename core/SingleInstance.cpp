@@ -1,6 +1,7 @@
 #include "SingleInstance.h"
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QTimer>
 
 SingleInstance::SingleInstance(const QString &name, QObject *parent)
     : QObject(parent), m_name(name)
@@ -18,7 +19,7 @@ bool SingleInstance::ask(const QString &name, const QByteArray &command, QByteAr
     while (!data.contains('\n') && socket.waitForReadyRead(timeoutMs))
         data += socket.readAll();
     if (reply) *reply = data.trimmed();
-    return true;
+    return data.contains('\n');
 }
 
 bool SingleInstance::listen()
@@ -34,10 +35,13 @@ bool SingleInstance::listen()
     }
     connect(m_server, &QLocalServer::newConnection, this, [this]() {
         while (QLocalSocket *s = m_server->nextPendingConnection()) {
+            s->setReadBufferSize(16385);
+            QTimer::singleShot(3000, s, [s]() { s->disconnectFromServer(); });
             connect(s, &QLocalSocket::disconnected, s, &QObject::deleteLater);
             connect(s, &QLocalSocket::readyRead, this, [this, s]() {
+                if (s->bytesAvailable() > 16384) { s->disconnectFromServer(); return; }
                 if (!s->canReadLine()) return;
-                const QByteArray command = s->readLine().trimmed().left(256);
+                const QByteArray command = s->readLine().trimmed();
                 const QByteArray answer = m_handler ? m_handler(command) : QByteArray("{}");
                 s->write(answer + '\n');
                 s->flush();
