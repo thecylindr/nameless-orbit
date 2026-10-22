@@ -222,6 +222,20 @@ bool create(const Spec &spec, QString *outName, QString *error)
             if (numberedWs && exists) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = %1, monitor = \"%2\" })").arg(wsId).arg(name));
             else dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(numberedWs ? QString::number(wsId) : QStringLiteral("\"name:orbit\"")));
         }
+        // проверка: когда нужный стол переносят или он пустеет и исчезает, Hyprland подставляет монитору следующий свободный номер (3, 4…) —
+        // если на виртуальном мониторе не тот стол, выбирается нужный заново (с короткой паузой на пересборку)
+        const QString wantName = numberedWs ? QString::number(wsId) : QStringLiteral("orbit");
+        for (int attempt = 0; attempt < 4; ++attempt) {
+            QString haveName;
+            for (const QJsonValue &v : hyprMonitors()) {
+                const QJsonObject m = v.toObject();
+                if (m.value(QStringLiteral("name")).toString() == name) haveName = m.value(QStringLiteral("activeWorkspace")).toObject().value(QStringLiteral("name")).toString();
+            }
+            if (haveName == wantName) break;
+            QThread::msleep(150);
+            dispatch(QStringLiteral("hl.dsp.focus({ monitor = \"%1\" })").arg(name));
+            dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(numberedWs ? QString::number(wsId) : QStringLiteral("\"name:orbit\"")));
+        }
         // пользователя — на прежнее место: монитор, стол, курсор
         dispatch(QStringLiteral("hl.dsp.focus({ monitor = \"%1\" })").arg(homeMon));
         if (homeWs > 0 && homeWs != wsId) dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(homeWs));
