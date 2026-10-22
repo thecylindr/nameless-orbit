@@ -629,6 +629,12 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
         vs.anchor = windowChoice.isEmpty() ? m_settings->secondAnchor() : windowChoice;   // для Hyprland выбор в окне запроса — имя монитора
         if (!VirtualDisplay::create(vs, &m_ssOutput, &err)) { m_ssOutput.clear(); declineSecondScreen(deviceId, err); return; }
         source = m_ssOutput;
+        m_ssWorkspace = vs.workspace;
+        if (!m_ssKeep.isSingleShot() && m_ssKeep.interval() != 1000) {
+            m_ssKeep.setInterval(1000);
+            connect(&m_ssKeep, &QTimer::timeout, this, [this] { VirtualDisplay::keepWorkspace(m_ssOutput, m_ssWorkspace); });
+        }
+        m_ssKeep.start();
         m_capture.setVirtualSize(QSize(spec.w, spec.h));
         m_input.setTarget(m_ssOutput);                                             // касания зрителя попадают на этот монитор
     } else if (VirtualDisplay::backend() == VirtualDisplay::Backend::Driftwm) {
@@ -651,6 +657,7 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
 
 void RemoteDesktopController::releaseSecondScreen()
 {
+    m_ssKeep.stop();
     if (!m_ssOutput.isEmpty()) { VirtualDisplay::destroy(m_ssOutput); m_ssOutput.clear(); }
     if (m_ssFps > 0) { m_capture.setScreenName(QString()); m_capture.setVirtualSize(QSize()); m_input.setTarget(QString()); }
     m_ssFps = 0; m_ssWidth = 0; m_ssMirror = false;

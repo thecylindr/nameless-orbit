@@ -257,6 +257,33 @@ bool create(const Spec &spec, QString *outName, QString *error)
     return true;
 }
 
+void keepWorkspace(const QString &outName, const QString &workspace)
+{
+    if (outName.isEmpty()) return;
+    const QString want = workspace.isEmpty() ? QStringLiteral("orbit") : workspace;
+    QString have, home;
+    int haveId = 0;
+    for (const QJsonValue &v : hyprMonitors()) {
+        const QJsonObject m = v.toObject();
+        const QString n = m.value(QStringLiteral("name")).toString();
+        if (n == outName) {
+            const QJsonObject w = m.value(QStringLiteral("activeWorkspace")).toObject();
+            have = w.value(QStringLiteral("name")).toString();
+            haveId = w.value(QStringLiteral("id")).toInt();
+        } else if (!n.startsWith(QLatin1String("HEADLESS")) && (home.isEmpty() || m.value(QStringLiteral("focused")).toBool())) home = n;
+    }
+    if (have.isEmpty() || have == want || home.isEmpty()) return;
+    // на виртуальный монитор попал чужой стол (Super+N при фокусе на нём, окно открылось по правилу) — он возвращается на настоящий монитор,
+    // а выбранный стол снова встаёт на виртуальный; фокус и курсор пользователя не трогаются
+    auto dispatch = [](const QString &lua) { run(QStringLiteral("hyprctl"), {QStringLiteral("dispatch"), lua}); };
+    if (haveId > 0) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = %1, monitor = \"%2\" })").arg(haveId).arg(home));
+    bool exists = false;
+    QByteArray wo;
+    if (run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("workspaces")}, &wo))
+        for (const QJsonValue &w : QJsonDocument::fromJson(wo).array()) if (w.toObject().value(QStringLiteral("name")).toString() == want) exists = true;
+    if (exists) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = \"%1\", monitor = \"%2\" })").arg(want, outName));
+}
+
 void destroy(const QString &outName)
 {
     if (outName.isEmpty()) return;
@@ -377,6 +404,7 @@ QStringList monitorNames() { return {}; }
 QString backendName() { return QString(); }
 bool create(const Spec &, QString *, QString *error) { if (error) *error = QStringLiteral("второй экран есть только на Linux"); return false; }
 void destroy(const QString &) {}
+void keepWorkspace(const QString &, const QString &) {}
 void cleanupStale() {}
 QRect outputRect(const QString &) { return {}; }
 QVariantList driftwmWindows() { return {}; }

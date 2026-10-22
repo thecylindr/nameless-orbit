@@ -30,6 +30,8 @@ QStringList monitorNames();                          // настоящие мо�
 bool create(const Spec &spec, QString *outName, QString *error);
 // удалить созданный монитор (повторный вызов безвреден)
 void destroy(const QString &outName);
+// держит на виртуальном мониторе только выбранный стол (пусто — «orbit»): чужой стол, попавший на него, возвращается на настоящий монитор
+void keepWorkspace(const QString &outName, const QString &workspace);
 // монитор остался от прошлого запуска (Orbit упал) — убрать: вызывается при старте
 void cleanupStale();
 // геометрия монитора на общей раскладке (логические пиксели); пусто — монитора нет

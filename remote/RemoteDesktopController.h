@@ -281,6 +281,8 @@ private:
     void stopAudioIn(const QString &state = QString());
     bool m_ssMirror = false;                          // хозяин: второй экран повторяет существующий монитор, а не создаёт новый
     QString m_shareSource;                            // что показывается сейчас: имя экрана, «window:…», пусто — основной
+    QTimer m_ssKeep;                                  // следит, чтобы на виртуальном мониторе оставался только выбранный стол
+    QString m_ssWorkspace;
     QString m_ssOutput;                               // хозяин: имя виртуального монитора (Hyprland)
     int m_ssFps = 0, m_ssWidth = 0;                   // хозяин: пока идёт второй экран — его частота и ширина кадра вместо общих настроек
     bool m_secondViewing = false;                     // зритель: идёт второй экран
