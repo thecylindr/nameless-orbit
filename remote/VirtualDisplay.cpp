@@ -288,13 +288,12 @@ void keepWorkspace(const QString &outName, const QString &workspace)
     const QString want = workspace.isEmpty() ? QStringLiteral("orbit") : workspace;
     QString have, home;
     int haveId = 0;
+    bool focused = false;
     for (const QJsonValue &v : hyprMonitors()) {
         const QJsonObject m = v.toObject();
         const QString n = m.value(QStringLiteral("name")).toString();
         if (n == outName) {
-            // пользователь сейчас работает на втором экране (фокус на нём): столы не трогаются — раньше Orbit «отбирал» стол, едва его открывали,
-            // и экраны перекидывало туда-обратно
-            if (m.value(QStringLiteral("focused")).toBool()) return;
+            focused = m.value(QStringLiteral("focused")).toBool();
             const QJsonObject w = m.value(QStringLiteral("activeWorkspace")).toObject();
             have = w.value(QStringLiteral("name")).toString();
             haveId = w.value(QStringLiteral("id")).toInt();
@@ -306,6 +305,9 @@ void keepWorkspace(const QString &outName, const QString &workspace)
     bool exists = false;
     for (const QJsonValue &w : QJsonDocument::fromJson(hyprJson("workspaces")).array()) if (w.toObject().value(QStringLiteral("name")).toString() == want) exists = true;
     if (exists) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = \"%1\", monitor = \"%2\" })").arg(want, outName));
+    // переключение стола (Super+4…) при фокусе на втором экране открывало стол на нём: стол уходит на настоящий монитор вместе с фокусом,
+    // на втором экране остаётся только выбранный
+    if (focused && haveId > 0) dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(haveId));
 }
 
 void destroy(const QString &outName, bool now)

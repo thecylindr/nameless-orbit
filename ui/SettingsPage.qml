@@ -424,6 +424,27 @@ Text { visible: RemoteDesktop.secondBackend === "Hyprland"; text: qsTr("Рядо
                 Common.GlassSwitch {
                     visible: IsMobile && Settings.keepRunning
                     width: parent.width
+                    label: qsTr("Синхронизация при выключенном экране")
+                    sub: qsTr("пока есть связь, телефон не засыпает: буфер, уведомления и файлы приходят сразу (немного больше расход батареи)")
+                    checked: Settings.backgroundSync; onToggled: v => Settings.backgroundSync = v
+                }
+                Row {
+                    id: battRow
+                    // результат системного вопроса виден только после возврата в приложение — перечитывается при каждом показе
+                    property bool ok: Settings.batteryUnrestricted()
+                    visible: IsMobile && Settings.keepRunning && !ok
+                    width: parent.width; spacing: 10
+                    Connections { target: Qt.application; function onStateChanged() { battRow.ok = Settings.batteryUnrestricted(); } }
+                    Text {
+                        width: parent.width - battBtn.width - 10; anchors.verticalCenter: parent.verticalCenter; wrapMode: Text.WordWrap
+                        text: qsTr("Система ограничивает Orbit в фоне — связь может пропадать")
+                        color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 12
+                    }
+                    Common.GlassButton { id: battBtn; text: qsTr("Снять ограничение"); primary: true; onClicked: Settings.requestBatteryUnrestricted() }
+                }
+                Common.GlassSwitch {
+                    visible: IsMobile && Settings.keepRunning
+                    width: parent.width
                     label: qsTr("Уведомление о работе в фоне")
                     sub: qsTr("постоянная строка в шторке; выключено — Orbit работает так же, но без уведомления")
                     checked: Settings.backgroundNotice; onToggled: v => Settings.backgroundNotice = v

@@ -80,6 +80,11 @@ bool hasHardwareVideoDecoder();
 bool feedVideo(const QByteArray &au, int width, int height, bool key, qint64 ptsUs);
 void stopVideo();
 void openBatterySettings();
+// Синхронизация в фоне (Android): keepSync — процессор не засыпает, пока есть связь; batteryUnrestricted — Orbit без ограничений батареи;
+// requestBatteryUnrestricted — системный вопрос «разрешить работу в фоне»
+void keepSync(bool on);
+bool batteryUnrestricted();
+void requestBatteryUnrestricted();
 
 }
 

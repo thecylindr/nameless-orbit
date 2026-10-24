@@ -93,7 +93,9 @@ ApplicationWindow {
             // окно — на тот экран, по размеру которого запрошен второй экран: иначе картинка вписывалась в чужой монитор с полями
             for (let i = 0; i < Qt.application.screens.length; ++i)
                 if (Qt.application.screens[i].name === RemoteDesktop.secondScreenName) screenWin.screen = Qt.application.screens[i];
-            detachScreen(id); screenWin.visibility = Window.FullScreen; return;
+            // полный экран задаётся до показа окна (showFullScreen): запрос после show() композитор иногда пропускал — окно оставалось
+            // обычным с полями по краям; повтор через мгновение — на случай, если окно сначала встало плиткой
+            detachScreen(id, true); fullTimer.restart(); return;
         }
         if (stack.currentItem && stack.currentItem.isScreen === true) return;
         stack.push(screenPage, { deviceId: id });
@@ -105,13 +107,14 @@ ApplicationWindow {
     Component { id: screenPage; RemoteScreenPage { onBack: stack.pop(); onDetach: win.detachScreen(deviceId) } }
 
     // отдельное окно с демонстрацией: можно держать рядом с работой, менять размер и разворачивать на весь экран
-    function detachScreen(id) {
+    function detachScreen(id, full) {
         screenWin.deviceId = id;
-        screenWin.show();
+        if (full === true) screenWin.showFullScreen(); else screenWin.show();
         screenWin.raise();
         screenWin.requestActivate();
         if (stack.currentItem && stack.currentItem.isScreen === true) stack.pop();
     }
+    Timer { id: fullTimer; interval: 350; onTriggered: if (screenWin.visible && screenWin.visibility !== Window.FullScreen) screenWin.showFullScreen() }
     Window {
         id: screenWin
         property string deviceId: ""

@@ -274,6 +274,21 @@ void openBatterySettings()
     QJniObject::callStaticMethod<void>(kService, "openBatterySettings", "(Landroid/content/Context;)V", context().object());
 }
 
+void keepSync(bool on)
+{
+    QJniObject::callStaticMethod<void>(kService, "keepSync", "(Landroid/content/Context;Z)V", context().object(), jboolean(on));
+}
+
+bool batteryUnrestricted()
+{
+    return QJniObject::callStaticMethod<jboolean>(kService, "batteryUnrestricted", "(Landroid/content/Context;)Z", context().object());
+}
+
+void requestBatteryUnrestricted()
+{
+    QJniObject::callStaticMethod<void>(kService, "requestBatteryUnrestricted", "(Landroid/content/Context;)V", context().object());
+}
+
 bool notificationsAllowed()
 {
     return QJniObject::callStaticMethod<jboolean>(kService, "notificationsEnabled", "(Landroid/content/Context;)Z", context().object());
@@ -361,6 +376,9 @@ bool hasHardwareVideoDecoder() { return false; }
 bool feedVideo(const QByteArray &, int, int, bool, qint64) { return false; }
 void stopVideo() {}
 void openBatterySettings() {}
+void keepSync(bool) {}
+bool batteryUnrestricted() { return true; }
+void requestBatteryUnrestricted() {}
 QString publishDownload(const QString &srcPath, const QString &fileName) { return moveToDownloads(srcPath, fileName); }
 
 #else
@@ -409,6 +427,9 @@ bool hasHardwareVideoDecoder() { return false; }
 bool feedVideo(const QByteArray &, int, int, bool, qint64) { return false; }
 void stopVideo() {}
 void openBatterySettings() {}
+void keepSync(bool) {}
+bool batteryUnrestricted() { return true; }
+void requestBatteryUnrestricted() {}
 QString publishDownload(const QString &srcPath, const QString &fileName) { return moveToDownloads(srcPath, fileName); }
 
 #ifdef ORBIT_DESKTOP_LINUX

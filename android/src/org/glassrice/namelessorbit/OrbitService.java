@@ -105,6 +105,7 @@ public class OrbitService extends Service {
 
     @Override public void onDestroy() {
         alive = false;
+        keepSync(this, false);
         if (wifiLock != null && wifiLock.isHeld()) wifiLock.release();
         super.onDestroy();
     }
@@ -170,6 +171,41 @@ public class OrbitService extends Service {
             if (!streamLock.isHeld()) streamLock.acquire(6 * 60 * 60 * 1000L);       // на всякий случай — не дольше шести часов
         } else if (streamLock != null && streamLock.isHeld()) {
             streamLock.release();
+        }
+    }
+
+    // синхронизация в фоне: пока есть связь с устройством, процессор не засыпает при выключенном экране — иначе Orbit пропускал
+    // проверки связи, компьютер считал телефон пропавшим, и буфер обмена, уведомления и файлы не доходили до включения экрана
+    private static PowerManager.WakeLock syncLock;
+    public static synchronized void keepSync(Context c, boolean on) {
+        if (on) {
+            if (syncLock == null) {
+                PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+                syncLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "orbit:sync");
+                syncLock.setReferenceCounted(false);
+            }
+            if (!syncLock.isHeld()) syncLock.acquire(12 * 60 * 60 * 1000L);       // страховка — не дольше 12 часов подряд
+        } else if (syncLock != null && syncLock.isHeld()) {
+            syncLock.release();
+        }
+    }
+
+    // работает ли Orbit без ограничений батареи (оптимизация отключена)
+    public static boolean batteryUnrestricted(Context c) {
+        PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName());
+    }
+
+    // системный вопрос «Разрешить работу в фоне?» сразу для Orbit; не открылся (прошивка без него) — общий список приложений
+    @android.annotation.SuppressLint("BatteryLife")
+    public static void requestBatteryUnrestricted(Context c) {
+        if (batteryUnrestricted(c)) return;
+        try {
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + c.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            c.startActivity(i);
+        } catch (RuntimeException e) {
+            openBatterySettings(c);
         }
     }
 

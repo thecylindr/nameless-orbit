@@ -17,6 +17,7 @@ class SettingsManager : public QObject
     // на Android — служба переднего плана с постоянным уведомлением, чтобы система не усыпляла связь
     Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)     // ru | en; пусто — человек ещё не выбирал (при первом запуске показывается выбор)
     Q_PROPERTY(bool keepRunning READ keepRunning WRITE setKeepRunning NOTIFY keepRunningChanged)
+    Q_PROPERTY(bool backgroundSync READ backgroundSync WRITE setBackgroundSync NOTIFY keepRunningChanged)       // Android: связь не засыпает при выключенном экране
     Q_PROPERTY(bool backgroundNotice READ backgroundNotice WRITE setBackgroundNotice NOTIFY keepRunningChanged)   // Android: показывать уведомление о работе в фоне (по умолчанию нет)
     // показ экрана: потолки частоты, качества и размера кадра. Авто — «лесенка» сама подстраивается под сеть, не превышая потолков;
     // не авто — значения держатся неизменными (если сеть не справляется, кадры пропускаются, а не ухудшаются)
@@ -56,6 +57,8 @@ public:
     Q_INVOKABLE void openNotificationSettings() const;
     Q_INVOKABLE void testNotification() const;
     Q_INVOKABLE void openBatterySettings() const;
+    Q_INVOKABLE bool batteryUnrestricted() const;       // Android: Orbit без ограничений батареи
+    Q_INVOKABLE void requestBatteryUnrestricted() const;
     Q_INVOKABLE void moveToBack() const;                // Android: свернуть приложение («Назад» на главной при работе в фоне)      // Android: окно «не ограничивать батарею» для Orbit      // показать пробное уведомление в шторке этого устройства
 
     bool discoveryOnStart() const { return m_settings.value(QStringLiteral("discoveryOnStart"), true).toBool(); }
@@ -65,6 +68,10 @@ public:
     void setLanguage(const QString &v) { m_settings.setValue(QStringLiteral("language"), v == QLatin1String("en") ? QStringLiteral("en") : QStringLiteral("ru")); emit languageChanged(); }
     bool keepRunning() const { return m_settings.value(QStringLiteral("keepRunning"), true).toBool(); }
     void setKeepRunning(bool v) { m_settings.setValue(QStringLiteral("keepRunning"), v); emit keepRunningChanged(); }
+    bool backgroundSync() const { return m_settings.value(QStringLiteral("backgroundSync"), true).toBool(); }
+    void setBackgroundSync(bool v) { m_settings.setValue(QStringLiteral("backgroundSync"), v); emit keepRunningChanged(); }
+    bool batteryAsked() const { return m_settings.value(QStringLiteral("batteryAsked"), false).toBool(); }      // вопрос о батарее уже задавался
+    void setBatteryAsked() { m_settings.setValue(QStringLiteral("batteryAsked"), true); }
     bool backgroundNotice() const { return m_settings.value(QStringLiteral("backgroundNotice"), false).toBool(); }
     void setBackgroundNotice(bool v) { m_settings.setValue(QStringLiteral("backgroundNotice"), v); emit keepRunningChanged(); }
 

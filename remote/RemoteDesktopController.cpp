@@ -64,7 +64,7 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
     // монитор второго экрана не должен пережить Orbit: на выходе убирается (а если Orbit упал — при следующем запуске, см. VirtualDisplay::cleanupStale)
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() { releaseSecondScreen(); });
     // на виртуальном мониторе — только выбранный стол; запрос через сокет Hyprland, раз в 2 с
-    m_ssKeep.setInterval(2000);
+    m_ssKeep.setInterval(600);                          // чужой стол на втором экране исправляется почти сразу (запрос идёт через сокет, это дёшево)
     connect(&m_ssKeep, &QTimer::timeout, this, [this] { VirtualDisplay::keepWorkspace(m_ssOutput, m_ssWorkspace); });
     // звук: пакеты показывающего уходят зрителю; настройки приёма применяются сразу; просмотр закончился — звук тоже
     connect(&m_audioOut, &AudioStream::packet, this, [this](const QByteArray &data, const QString &codec) {
@@ -154,7 +154,10 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
                 // кодер не тянет заданную частоту: запоминаем, сколько он реально выдаёт, и две минуты выше не поднимаемся — иначе частота «пилила»:
                 // ПК упирался в процессор, лесенка поднимала частоту, снова упиралась и снова падала (отсюда «то 40, то ещё что-то»)
                 if (cpuLag) { m_encCeilFps = qMax(20, m_capture.captureFps()); m_encCeilUntil = tNow + 60000; m_cpuLagSeconds = 0; }
-                if ((++m_badSeconds >= 3 || severe) && m_level < steps - 1) {
+                // у видео каждая смена ступени — перезапуск кодера (чёрный кадр, ожидание ключевого): снижение — после 5 плохих секунд
+                // и не чаще раза в 10 с, иначе показ «мерцал» от постоянных перезапусков
+                const bool settled = !vid || tNow - m_levelSince >= 10000;
+                if (((++m_badSeconds >= (vid ? 5 : 3) && settled) || severe) && m_level < steps - 1) {
                     // подъём на эту ступень только что был и сорвался — в следующий раз на неё поднимаемся осторожнее (дольше ждём)
                     if (m_levelSince > 0 && tNow - m_levelSince < 15000) m_climbPenalty[m_level] = qMin(36, m_climbPenalty[m_level] * 2 + 3);
                     m_level = qMin(steps - 1, m_level + (severe ? 2 : 1));
@@ -163,8 +166,8 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
             } else if (fast) {
                 m_badSeconds = 0;
                 // подъём — на одну ступень после трёх спокойных секунд плюс «штраф» этой ступени за прошлые срывы
-                const int need = (vid ? 6 : 3) + (m_level > 0 ? m_climbPenalty[m_level - 1] : 0);      // у видео подъём реже: каждый — перезапуск кодера
-                if (++m_goodSeconds >= need && m_level > 0) { --m_level; m_levelSince = tNow; m_goodSeconds = 0; applyLevel(); }
+                const int need = (vid ? 12 : 3) + (m_level > 0 ? m_climbPenalty[m_level - 1] : 0);     // у видео подъём реже: каждый — перезапуск кодера
+                if (++m_goodSeconds >= need && m_level > 0 && (!vid || tNow - m_levelSince >= 20000)) { --m_level; m_levelSince = tNow; m_goodSeconds = 0; applyLevel(); }
                 // долгая стабильность прощает прошлые срывы: штрафы медленно сходят на нет
                 if (tNow - m_levelSince > 30000 && m_goodSeconds % 10 == 9)
                     for (int &pen : m_climbPenalty) pen = qMax(0, pen - 1);
@@ -378,7 +381,14 @@ void RemoteDesktopController::applyLevel()
     const int base = widthCap > 0 ? widthCap : qBound(800, m_viewerWidth > 0 ? m_viewerWidth : 1600, 3840);
 
     // зритель разжимает один кадр за m_peerDecodeMs: слать чаще — только забивать ему очередь (задержка и «моргание»)
-    const int decodeFpsCap = m_peerDecodeMs > 0 ? qMax(5, int(1000.0 / (m_peerDecodeMs * 1.25))) : 60;
+    int decodeFpsCap = m_peerDecodeMs > 0 ? qMax(5, int(1000.0 / (m_peerDecodeMs * 1.25))) : 60;
+    // у видео потолок от разжатия меняется с запасом: время разжатия скачет каждую секунду, и частота кодера вслед за ним перезапускала wf-recorder
+    if (videoLadder()) {
+        const qint64 t = nowMs();
+        if (m_vDecodeCap <= 0 || decodeFpsCap < m_vDecodeCap * 0.6
+            || (qAbs(decodeFpsCap - m_vDecodeCap) > m_vDecodeCap * 0.25 && t - m_vDecodeCapAt > 15000)) { m_vDecodeCap = decodeFpsCap; m_vDecodeCapAt = t; }
+        decodeFpsCap = m_vDecodeCap;
+    }
     m_extBitrateKbps = qBound(3000, qualityCap * 160, 16000);
     if (!m_settings->streamAuto()) {                       // ручной режим: значения неизменны
         m_capture.setMaxWidth(base);
@@ -553,7 +563,7 @@ void RemoteDesktopController::requestSecondScreen(const QString &deviceId, const
     const int maxShort = landscape ? 2400 : 3840;
     if (l > maxLong) { l = maxLong; s = int(l / aspect); }
     if (s > maxShort) { s = maxShort; l = int(s * aspect); }
-    l -= l % 12; s -= s % 12;                                  // кратно 12: на такой размер делятся нацело масштабы 1,5 и 2 (иначе Hyprland подставит свой)
+    l -= l % 2; s -= s % 2;                                    // чётный размер (кодеру нужен); масштаб, при котором размер делится нацело, подбирает VirtualDisplay — раньше обрезка до кратного 12 давала 2556×1440 и полосы по краям
     SecondSpec ss;
     ss.w = landscape ? l : s; ss.h = landscape ? s : l;
     ss.fps = qBound(24, spec.value(QStringLiteral("fps"), 60).toInt(), 120);
@@ -805,7 +815,7 @@ void RemoteDesktopController::acceptShareRequest(const QString &deviceId, const 
     // новый показ начинается со средней ступени, дальше она подстраивается под сеть и экран зрителя
     m_capture.setRegion(QRectF(0, 0, 1, 1)); m_outRegion = QRectF(0, 0, 1, 1); m_capture.requestKeyFrame();
     // начинаем с потолков, заданных человеком
-    m_level = 0; m_levelSince = 0; m_encCeilFps = 0; m_encCeilUntil = 0; for (int &pen : m_climbPenalty) pen = 0; m_rttBase = 0; m_goodSeconds = 0; m_badSeconds = 0; m_dropsInPeriod = 0; m_calmSeconds = 0; m_queueBlocked = false;
+    m_level = 0; m_levelSince = 0; m_vDecodeCap = 0; m_encCeilFps = 0; m_encCeilUntil = 0; for (int &pen : m_climbPenalty) pen = 0; m_rttBase = 0; m_goodSeconds = 0; m_badSeconds = 0; m_dropsInPeriod = 0; m_calmSeconds = 0; m_queueBlocked = false;
     m_sendSeq = 0; m_ackedSeq = 0; m_lastAckMs = nowMs(); m_sentAt.clear(); m_rttMs = 0; m_peerDecodeMs = 0;
     m_capture.setEncoderPreference(m_settings->streamEncoder());
     chooseFormat();       // видео, «Тайлы Orbit» или JPEG — по моей настройке и возможностям зрителя

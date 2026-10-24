@@ -1,7 +1,7 @@
 // NameLess Orbit — связь между своими устройствами в локальной сети: обнаружение, сопряжение, буфер обмена,
 // уведомления, батарея, медиа, команды, демонстрация и управление экраном. Подробно — в README.md.
 #ifndef APP_VERSION_STR
-#define APP_VERSION_STR "0.2.6"
+#define APP_VERSION_STR "0.2.7"
 #endif
 
 #include <QGuiApplication>
@@ -133,13 +133,24 @@ int main(int argc, char *argv[])
 
     // фон: закрытие окна не завершает Orbit (компьютер), служба переднего плана (Android)
     // постоянное уведомление службы Android всегда несёт текст о связи и обновляется при её изменении — пустой строки в шторке не бывает
-    QObject::connect(&peerManager, &PeerManager::connectedChanged, &app, [&peerManager]() {
+    // синхронизация в фоне (Android): пока есть связь и включена работа в фоне, процессор не засыпает при выключенном экране
+    auto syncLock = [&peerManager, &settings]() {
+        PlatformBridge::keepSync(settings.keepRunning() && settings.backgroundSync() && !peerManager.connectedDevicesForQml().isEmpty());
+    };
+    QObject::connect(&peerManager, &PeerManager::connectedChanged, &app, [&peerManager, syncLock]() {
         QStringList names;
         for (const QVariant &v : peerManager.connectedDevicesForQml()) names << v.toMap().value(QStringLiteral("name")).toString();
         PlatformBridge::setBackgroundStatus(names.isEmpty() ? QStringLiteral("Нет связи — ищу устройства") : QStringLiteral("Подключено: ") + names.join(QStringLiteral(", ")));
+        syncLock();
     });
+    QObject::connect(&settings, &SettingsManager::keepRunningChanged, &app, syncLock);
 #if defined(Q_OS_ANDROID)
     if (settings.keepRunning()) PlatformBridge::startBackgroundService(!settings.backgroundNotice());
+    // прошивки (MIUI, One UI…) усыпляют приложение в фоне вопреки службе: один раз спрашиваем «разрешить работу в фоне»
+    if (settings.keepRunning() && !PlatformBridge::batteryUnrestricted() && !settings.batteryAsked()) {
+        settings.setBatteryAsked();
+        QTimer::singleShot(2500, &app, [] { PlatformBridge::requestBatteryUnrestricted(); });
+    }
     QObject::connect(&settings, &SettingsManager::keepRunningChanged, &app, [&settings]() {
         // служба перезапускается: уведомление о работе в фоне меняет канал (видимый / выключенный)
         PlatformBridge::stopBackgroundService();
