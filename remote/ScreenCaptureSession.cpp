@@ -1,5 +1,6 @@
 #include "ScreenCaptureSession.h"
 #include "HyprIpc.h"
+#include "KWinBridge.h"
 #include "H264Stream.h"
 #include "VirtualDisplay.h"
 #include <QVideoFrame>
@@ -164,6 +165,7 @@ bool ScreenCaptureSession::wfAvailable() const
 {
     if (qEnvironmentVariable("ORBIT_CAPTURE") == QLatin1String("qt") || m_screenName == QLatin1String("portal")) return false;
     if (QGuiApplication::platformName() != QLatin1String("wayland")) return false;
+    if (KWinBridge::isKWin()) return false;          // KWin не поддерживает захват wlroots: сразу портал KDE, без пятисекундной пробы wf-recorder
     return !QStandardPaths::findExecutable(QStringLiteral("wf-recorder")).isEmpty();
 }
 

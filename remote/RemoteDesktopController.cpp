@@ -1,4 +1,8 @@
 #include "RemoteDesktopController.h"
+#include <QThread>
+#include "KWinBridge.h"
+#include <QWindow>
+#include <memory>
 #include <QElapsedTimer>
 #include <cstring>
 #include <QColor>
@@ -59,6 +63,9 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
     });
     // монитор второго экрана не должен пережить Orbit: на выходе убирается (а если Orbit упал — при следующем запуске, см. VirtualDisplay::cleanupStale)
     connect(qApp, &QCoreApplication::aboutToQuit, this, [this]() { releaseSecondScreen(); });
+    // на виртуальном мониторе — только выбранный стол; запрос через сокет Hyprland, раз в 2 с
+    m_ssKeep.setInterval(2000);
+    connect(&m_ssKeep, &QTimer::timeout, this, [this] { VirtualDisplay::keepWorkspace(m_ssOutput, m_ssWorkspace); });
     // звук: пакеты показывающего уходят зрителю; настройки приёма применяются сразу; просмотр закончился — звук тоже
     connect(&m_audioOut, &AudioStream::packet, this, [this](const QByteArray &data, const QString &codec) {
         if (m_sharingTo.isEmpty() || m_manager->backlog(m_sharingTo) > 256 * 1024) return;       // сеть не успевает — кусок пропускается, звук не копится
@@ -236,7 +243,7 @@ static bool canEncodeH264()
 #if defined(Q_OS_ANDROID)
     return true;
 #elif defined(ORBIT_DESKTOP_LINUX)
-    return QGuiApplication::platformName() == QLatin1String("wayland") && !QStandardPaths::findExecutable(QStringLiteral("wf-recorder")).isEmpty();
+    return QGuiApplication::platformName() == QLatin1String("wayland") && !KWinBridge::isKWin() && !QStandardPaths::findExecutable(QStringLiteral("wf-recorder")).isEmpty();
 #else
     return false;
 #endif
@@ -527,7 +534,12 @@ void RemoteDesktopController::requestSecondScreen(const QString &deviceId, const
     if (m_viewing == deviceId && m_secondViewing) return;
     if (!m_viewing.isEmpty()) stopViewing();          // идёт обычный просмотр — второй экран его заменяет
     // размер экрана этого устройства (физические пиксели) → размер второго экрана: ориентация, разрешение, предел 2560×1600 с сохранением пропорций
-    const QScreen *sc = QGuiApplication::primaryScreen();
+    // экран, на котором откроется окно второго экрана, — тот, где сейчас окно Orbit (а не «основной»: на ПК с двумя мониторами
+    // размер брался с другого монитора, и картинка второго экрана занимала окно не целиком)
+    const QWindow *fw = QGuiApplication::focusWindow();
+    if (!fw) { const auto tops = QGuiApplication::topLevelWindows(); for (const QWindow *w : tops) if (w->isVisible()) { fw = w; break; } }
+    const QScreen *sc = fw && fw->screen() ? fw->screen() : QGuiApplication::primaryScreen();
+    m_secondScreenName = sc ? sc->name() : QString();
     QSize px = sc ? sc->size() * sc->devicePixelRatio() : QSize(1920, 1080);
     const int longS = qMax(px.width(), px.height()), shortS = qMax(1, qMin(px.width(), px.height()));
     const QString orient = spec.value(QStringLiteral("orientation"), QStringLiteral("auto")).toString();
@@ -615,7 +627,8 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
     if (!m_sharingTo.isEmpty()) stopSharing(); // Stop the previous session before creating or replacing its output.
     QString source, err;
     m_ssMirror = false;
-    if (VirtualDisplay::backend() == VirtualDisplay::Backend::Hyprland && spec.mode == QLatin1String("mirror")) {
+    // KDE Plasma — всегда повтор: создавать мониторы KWin извне не даёт
+    if ((VirtualDisplay::backend() == VirtualDisplay::Backend::Hyprland && spec.mode == QLatin1String("mirror")) || VirtualDisplay::backend() == VirtualDisplay::Backend::KWin) {
         // повтор существующего монитора: выбранный в запросе (или в настройках), иначе первый; новый монитор не создаётся, касания идут на него же
         QString mon = windowChoice.isEmpty() ? m_settings->secondAnchor() : windowChoice;
         const QStringList mons = VirtualDisplay::monitorNames();
@@ -631,16 +644,31 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
         VirtualDisplay::Spec vs; vs.width = spec.w; vs.height = spec.h; vs.fps = spec.fps; vs.side = spec.side; vs.scale = spec.scale;
         vs.workspace = spec.workspace.isEmpty() ? m_settings->secondWorkspace() : (spec.workspace == QLatin1String("own") ? QString() : spec.workspace);      // выбран на устройстве: «own» — отдельный стол, число — стол 1–10
         vs.anchor = windowChoice.isEmpty() ? m_settings->secondAnchor() : windowChoice;   // для Hyprland выбор в окне запроса — имя монитора
-        if (!VirtualDisplay::create(vs, &m_ssOutput, &err)) { m_ssOutput.clear(); declineSecondScreen(deviceId, err); return; }
-        source = m_ssOutput;
-        m_ssWorkspace = vs.workspace;
-        if (!m_ssKeep.isSingleShot() && m_ssKeep.interval() != 1000) {
-            m_ssKeep.setInterval(1000);
-            connect(&m_ssKeep, &QTimer::timeout, this, [this] { VirtualDisplay::keepWorkspace(m_ssOutput, m_ssWorkspace); });
-        }
-        m_ssKeep.start();
-        m_capture.setVirtualSize(QSize(spec.w, spec.h));
-        m_input.setTarget(m_ssOutput);                                             // касания зрителя попадают на этот монитор
+        // монитор создаётся в рабочем потоке: это до пары секунд запросов к Hyprland, и раньше окно Orbit и связь с устройствами на это время замирали.
+        // Пока он создаётся, показ могли отменить или запросить заново — тогда готовый монитор сразу убирается (номер попытки m_ssGen)
+        struct Result { bool ok = false; QString name, err; QSize size; };
+        auto res = std::make_shared<Result>();
+        const int gen = ++m_ssGen;
+        sendStatus(deviceId, QStringLiteral("Создаю виртуальный монитор…"));
+        QThread *t = QThread::create([vs, res]() { res->ok = VirtualDisplay::create(vs, &res->name, &res->size, &res->err); });
+        connect(t, &QThread::finished, this, [this, t, res, gen, deviceId, spec, ws = vs.workspace]() {
+            t->deleteLater();
+            if (gen != m_ssGen) { if (res->ok) VirtualDisplay::destroy(res->name, true); return; }
+            if (!res->ok) { declineSecondScreen(deviceId, res->err); return; }
+            m_ssOutput = res->name;
+            m_ssWorkspace = ws;
+            m_ssPeer = deviceId;
+            emit virtualScreen(m_ssOutput, QStringLiteral("open"), m_manager->trustStore()->device(deviceId).name, m_manager->trustStore()->device(deviceId).kind);
+            m_ssKeep.start();
+            // размер — настоящий, каким его сделал Hyprland: по нему считаются области кадра и касания (иначе картинка у зрителя не на весь экран)
+            m_capture.setVirtualSize(res->size);
+            m_input.setTarget(m_ssOutput);                                         // касания зрителя попадают на этот монитор
+            if (res->size != QSize(spec.w, spec.h))
+                ScreenCaptureSession::log(QStringLiteral("Hyprland выставил второму экрану %1×%2 вместо %3×%4").arg(res->size.width()).arg(res->size.height()).arg(spec.w).arg(spec.h));
+            startSecondShare(deviceId, spec, m_ssOutput);
+        });
+        t->start();
+        return;
     } else if (VirtualDisplay::backend() == VirtualDisplay::Backend::Driftwm) {
         // БЕТА: вторым экраном становится окно приложения, подогнанное под размер экрана зрителя
         const int wid = windowChoice.toInt();
@@ -653,6 +681,11 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
         m_input.setTarget(QString(), QRectF(double(rect.x() - orect.x()) / orect.width(), double(rect.y() - orect.y()) / orect.height(),
                                            double(rect.width()) / orect.width(), double(rect.height()) / orect.height()));
     } else { declineSecondScreen(deviceId, QStringLiteral("второй экран поддерживают Hyprland и driftwm (бета)")); return; }
+    startSecondShare(deviceId, spec, source);
+}
+
+void RemoteDesktopController::startSecondShare(const QString &deviceId, const SecondSpec &spec, const QString &source)
+{
     m_ssFps = spec.fps; m_ssWidth = spec.w;
     ScreenCaptureSession::log(QStringLiteral("Второй экран для %1: %2×%3, %4 к/с, источник — %5").arg(who(deviceId)).arg(spec.w).arg(spec.h).arg(spec.fps).arg(source));
     acceptShareRequest(deviceId, source);
@@ -661,9 +694,15 @@ void RemoteDesktopController::acceptSecondScreen(const QString &deviceId, const 
 
 void RemoteDesktopController::releaseSecondScreen()
 {
+    ++m_ssGen;                                        // монитор, который ещё создаётся, не понадобится
     m_ssKeep.stop();
     if (m_ssFps > 0) m_capture.stop();
-    if (!m_ssOutput.isEmpty()) { VirtualDisplay::destroy(m_ssOutput); m_ssOutput.clear(); }
+    if (!m_ssOutput.isEmpty()) {
+        // сначала предупреждение (NameLess UI убирает свои окна с этого монитора), монитор удаляется с паузой (см. VirtualDisplay::destroy)
+        emit virtualScreen(m_ssOutput, QStringLiteral("closing"), m_manager->trustStore()->device(m_ssPeer).name, QString());
+        VirtualDisplay::destroy(m_ssOutput);
+        m_ssOutput.clear();
+    }
     if (m_ssFps > 0) { m_capture.setScreenName(QString()); m_capture.setVirtualSize(QSize()); m_input.setTarget(QString()); }
     m_ssFps = 0; m_ssWidth = 0; m_ssMirror = false;
 }
@@ -865,6 +904,7 @@ void RemoteDesktopController::declineShareRequest(const QString &deviceId)
 void RemoteDesktopController::stopSharing()
 {
     ScreenCaptureSession::log(QStringLiteral("Останавливаю показ (получатель: %1, захват телефона: %2, захват ПК: %3)").arg(m_sharingTo.isEmpty() ? QStringLiteral("нет") : who(m_sharingTo), m_externalActive ? QStringLiteral("идёт") : QStringLiteral("нет"), m_capture.isActive() ? QStringLiteral("идёт") : QStringLiteral("нет")));
+    ++m_ssGen;                                        // второй экран, монитор которого ещё создаётся, отменён вместе с показом
     if (m_sharingTo.isEmpty() && !m_externalActive && !m_capture.isActive()) return;      // показа нет ни кому, и захват не висит
     m_capture.stop();
     m_audioOut.stopCapture();

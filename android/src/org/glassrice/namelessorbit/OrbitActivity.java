@@ -40,6 +40,14 @@ public class OrbitActivity extends QtActivity {
         super.onDestroy();
     }
 
+    // из C++: «Назад» на главной странице при работе в фоне — приложение сворачивается, а не закрывается
+    // (закрытие окна останавливало службу и весь процесс вместе со связью)
+    public static void moveToBack() {
+        final OrbitActivity a = instance;
+        if (a == null) return;
+        a.runOnUiThread(new Runnable() { @Override public void run() { a.moveTaskToBack(true); } });
+    }
+
     // ---- картинка в картинке: просмотр чужого экрана остаётся маленьким окном, когда человек уходит в другое приложение ----
     private static boolean pipEnabled = false;
     private static int pipW = 16, pipH = 9;

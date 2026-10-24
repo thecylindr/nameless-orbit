@@ -8,6 +8,8 @@
 #include <QRectF>
 #include <QSet>
 #include <QTimer>
+#include <QVariantMap>
+#include <QPointF>
 
 class QSocketNotifier;
 
@@ -28,7 +30,9 @@ public:
     explicit EdgeCrossing(PeerManager *manager, QObject *parent = nullptr);
     ~EdgeCrossing() override;
 
-    static bool available();                 // Linux с Hyprland, есть доступ к /dev/input и /dev/uinput
+    static bool available();                 // Linux с Hyprland или KDE Plasma, есть доступ к /dev/input и /dev/uinput
+    // KDE Plasma: какой компьютер стоит за каждым краем ({ left|right|top|bottom: deviceId }); в Hyprland края задаёт NameLess UI
+    void setKwinLinks(const QVariantMap &links);
     bool isEnabled() const override { return available(); }
     void handleMessage(const QString &deviceId, const QJsonObject &payload) override;
     bool needsPermission(const QJsonObject &) const override { return false; }    // проверяется здесь: разрешение «remoteDesktop»
@@ -73,6 +77,13 @@ private:
 
     // ---- Hyprland ----
     static QByteArray hypr(const QByteArray &request);      // запрос к сокету Hyprland без запуска hyprctl
+    void warpTo(const QPointF &p);
+    QPointF cursorPos() const;
+    // ---- KDE Plasma ----
+    QVariantMap m_kwinLinks;
+    QString m_kwinSide, m_kwinScreen;
+    double m_kwinPos = 0.5;
+    QTimer m_kwinDwell;
     static QRectF monitorAt(const QString &side, const QString &name, QString *outName);
     void emitCrossing(const QString &dir, const QString &side, double pos, const QString &screen, const QString &peer);
 };

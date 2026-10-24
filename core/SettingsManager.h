@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QSettings>
+#include <QVariantMap>
 
 // Общие настройки приложения (не относящиеся к конкретному устройству — те в Identity, и не к списку
 // доверенных — тот в TrustStore). Простые флаги, каждый — отдельное свойство QSettings, как в SettingsManager
@@ -16,6 +17,7 @@ class SettingsManager : public QObject
     // на Android — служба переднего плана с постоянным уведомлением, чтобы система не усыпляла связь
     Q_PROPERTY(QString language READ language WRITE setLanguage NOTIFY languageChanged)     // ru | en; пусто — человек ещё не выбирал (при первом запуске показывается выбор)
     Q_PROPERTY(bool keepRunning READ keepRunning WRITE setKeepRunning NOTIFY keepRunningChanged)
+    Q_PROPERTY(bool backgroundNotice READ backgroundNotice WRITE setBackgroundNotice NOTIFY keepRunningChanged)   // Android: показывать уведомление о работе в фоне (по умолчанию нет)
     // показ экрана: потолки частоты, качества и размера кадра. Авто — «лесенка» сама подстраивается под сеть, не превышая потолков;
     // не авто — значения держатся неизменными (если сеть не справляется, кадры пропускаются, а не ухудшаются)
     Q_PROPERTY(bool streamAuto READ streamAuto WRITE setStreamAuto NOTIFY streamChanged)
@@ -29,7 +31,8 @@ class SettingsManager : public QObject
     Q_PROPERTY(QString secondAnchor READ secondAnchor WRITE setSecondAnchor NOTIFY secondChanged)    // у какого монитора ставится второй экран: пусто — у того, где курсор/фокус, иначе имя (eDP-1)
     Q_PROPERTY(QString secondWorkspace READ secondWorkspace WRITE setSecondWorkspace NOTIFY secondChanged)   // рабочий стол Hyprland на втором экране: пусто — отдельный «orbit» (не мешает переключению 1–10), иначе номер 1–10
     Q_PROPERTY(int secondGraceSec READ secondGraceSec WRITE setSecondGraceSec NOTIFY secondChanged)       // сколько секунд ждать пропавшее устройство, потом второй экран освобождается и окна возвращаются на основной монитор
-    Q_PROPERTY(QString secondScale READ secondScale WRITE setSecondScale NOTIFY secondChanged)       // масштаб второго экрана по умолчанию: auto или число (1, 1.25, 1.5, 2)
+    Q_PROPERTY(QString secondScale READ secondScale WRITE setSecondScale NOTIFY secondChanged)
+    Q_PROPERTY(QVariantMap crossLinks READ crossLinks WRITE setCrossLinks NOTIFY crossLinksChanged)    // KDE Plasma: компьютер за каждым краем экрана ({ right: deviceId, … }) для перехода курсора       // масштаб второго экрана по умолчанию: auto или число (1, 1.25, 1.5, 2)
     // звук между устройствами (см. remote/AudioStream.h)
     Q_PROPERTY(int audioVolume READ audioVolume WRITE setAudioVolume NOTIFY audioChanged)                 // громкость принимаемого звука, 0..100
     Q_PROPERTY(int audioLatencyMs READ audioLatencyMs WRITE setAudioLatencyMs NOTIFY audioChanged)        // буфер приёма: меньше — быстрее, больше — без треска
@@ -52,7 +55,8 @@ public:
     Q_INVOKABLE void requestNotificationPermission() const;
     Q_INVOKABLE void openNotificationSettings() const;
     Q_INVOKABLE void testNotification() const;
-    Q_INVOKABLE void openBatterySettings() const;      // Android: окно «не ограничивать батарею» для Orbit      // показать пробное уведомление в шторке этого устройства
+    Q_INVOKABLE void openBatterySettings() const;
+    Q_INVOKABLE void moveToBack() const;                // Android: свернуть приложение («Назад» на главной при работе в фоне)      // Android: окно «не ограничивать батарею» для Orbit      // показать пробное уведомление в шторке этого устройства
 
     bool discoveryOnStart() const { return m_settings.value(QStringLiteral("discoveryOnStart"), true).toBool(); }
     void setDiscoveryOnStart(bool v) { m_settings.setValue(QStringLiteral("discoveryOnStart"), v); emit discoveryOnStartChanged(); }
@@ -61,6 +65,8 @@ public:
     void setLanguage(const QString &v) { m_settings.setValue(QStringLiteral("language"), v == QLatin1String("en") ? QStringLiteral("en") : QStringLiteral("ru")); emit languageChanged(); }
     bool keepRunning() const { return m_settings.value(QStringLiteral("keepRunning"), true).toBool(); }
     void setKeepRunning(bool v) { m_settings.setValue(QStringLiteral("keepRunning"), v); emit keepRunningChanged(); }
+    bool backgroundNotice() const { return m_settings.value(QStringLiteral("backgroundNotice"), false).toBool(); }
+    void setBackgroundNotice(bool v) { m_settings.setValue(QStringLiteral("backgroundNotice"), v); emit keepRunningChanged(); }
 
     bool streamAuto() const { return m_settings.value(QStringLiteral("streamAuto"), true).toBool(); }
     bool sendReplies() const { return m_settings.value(QStringLiteral("sendReplies"), true).toBool(); }
@@ -80,6 +86,8 @@ public:
     void setSecondGraceSec(int v) { m_settings.setValue(QStringLiteral("secondGraceSec"), qBound(3, v, 120)); emit secondChanged(); }
     QString secondScale() const { return m_settings.value(QStringLiteral("secondScale"), QStringLiteral("auto")).toString(); }
     void setSecondScale(const QString &v) { m_settings.setValue(QStringLiteral("secondScale"), v); emit secondChanged(); }
+    QVariantMap crossLinks() const { return m_settings.value(QStringLiteral("crossLinks")).toMap(); }
+    void setCrossLinks(const QVariantMap &v) { m_settings.setValue(QStringLiteral("crossLinks"), v); emit crossLinksChanged(); }
     int audioVolume() const { return qBound(0, m_settings.value(QStringLiteral("audioVolume"), 80).toInt(), 100); }
     void setAudioVolume(int v) { m_settings.setValue(QStringLiteral("audioVolume"), qBound(0, v, 100)); emit audioChanged(); }
     int audioLatencyMs() const { return qBound(40, m_settings.value(QStringLiteral("audioLatencyMs"), 120).toInt(), 600); }
@@ -120,6 +128,7 @@ signals:
     void startMinimizedChanged();
     void streamChanged();
     void secondChanged();
+    void crossLinksChanged();
     void audioChanged();
     void repliesChanged();
     void keepRunningChanged();

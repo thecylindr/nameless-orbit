@@ -1,4 +1,5 @@
 #include "OrbitDBus.h"
+#include "../plugins/MediaPlugin.h"
 #include "PeerManager.h"
 #include "Identity.h"
 #include "../plugins/BatteryPlugin.h"
@@ -82,6 +83,17 @@ QByteArray OrbitDBus::statusJson() const
         const QString id = d.value(QStringLiteral("deviceId")).toString();
         d[QStringLiteral("battery")] = m_battery->hasRemote(id) ? m_battery->remotePercent(id) : -1;
         d[QStringLiteral("charging")] = m_battery->remoteCharging(id);
+        d[QStringLiteral("brightness")] = m_battery->remoteBrightness(id);       // яркость экрана, 0..100; -1 — неизвестна
+        // что играет: обложка — data URL (JPEG) или ссылка; at — когда получено (позиция досчитывается от него)
+        if (m_media) {
+            const QVariantMap m = m_media->remoteMedia(id);
+            if (!m.isEmpty() && !m.value(QStringLiteral("title")).toString().isEmpty()) {
+                QJsonObject mo = QJsonObject::fromVariantMap(m);
+                const QString art = m.value(QStringLiteral("art")).toString();
+                mo[QStringLiteral("art")] = !art.isEmpty() ? QStringLiteral("data:image/jpeg;base64,") + art : m.value(QStringLiteral("artUrl")).toString();
+                d[QStringLiteral("media")] = mo;
+            }
+        }
         d[QStringLiteral("commands")] = QJsonArray::fromVariantList(m_run->remoteCommands(id));      // быстрые команды этого устройства
         connected.append(d);
     }
@@ -90,6 +102,17 @@ QByteArray OrbitDBus::statusJson() const
     o[QStringLiteral("transfers")] = QJsonArray::fromVariantList(m_share->transfers());
     o[QStringLiteral("crossing")] = m_crossing ? m_crossing->activeDeviceId() : QString();      // с кем сейчас общий курсор
     return QJsonDocument(o).toJson(QJsonDocument::Compact);
+}
+
+void OrbitDBus::setMedia(MediaPlugin *media)
+{
+    m_media = media;
+    connect(media, &MediaPlugin::remoteMediaChanged, this, &OrbitDBus::notifyChanged);
+}
+
+void OrbitDBus::MediaCommand(const QString &deviceId, const QString &action)
+{
+    if (m_media) m_media->sendCommand(deviceId, action);
 }
 
 void OrbitDBus::setCrossing(EdgeCrossing *crossing)

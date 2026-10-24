@@ -61,6 +61,7 @@ class RemoteDesktopController : public PluginBase
     // «Второй экран»: это устройство — монитор другого компьютера (зритель) / другое устройство — монитор этого (хозяин)
     Q_PROPERTY(bool secondScreen READ secondScreen NOTIFY secondScreenChanged)               // зритель: идёт режим «второй экран» (страница просмотра на весь экран, касания = мышь)
     Q_PROPERTY(int secondOrientation READ secondOrientation NOTIFY secondScreenChanged)       // 1 — альбомная, 2 — портретная
+    Q_PROPERTY(QString secondScreenName READ secondScreenName NOTIFY secondScreenChanged)     // зритель-ПК: экран, по размеру которого запрошен второй экран
     Q_PROPERTY(QString secondBackend READ secondBackend CONSTANT)                              // «Hyprland», «driftwm (бета)» или пусто — что умеет этот компьютер как хозяин
     Q_PROPERTY(QStringList secondMonitors READ secondMonitors NOTIFY secondScreenChanged)     // мониторы этого компьютера, рядом с которыми можно поставить второй экран
     // звук: состояние приёма («» выкл, waiting, on, off:причина) и что умеет этот компьютер как источник
@@ -111,6 +112,7 @@ public:
     int viewFps() const { return m_viewFps; }
     bool secondScreen() const { return m_secondViewing; }
     int secondOrientation() const { return m_secondOrient; }
+    QString secondScreenName() const { return m_secondScreenName; }
     QString secondBackend() const { return VirtualDisplay::backendName(); }
     QString audioState() const { return m_audioState; }
     QString audioCodecIn() const { return m_audioCodecIn; }
@@ -220,6 +222,8 @@ signals:
     void secondScreenRequested(const QString &deviceId, const QString &name, const QString &description, const QVariantList &windows);   // хозяину: устройство просит стать вторым экраном
     void secondScreenOffered(const QString &deviceId, const QString &name, const QString &description);   // зрителю: компьютер предлагает стать его вторым экраном
     void secondScreenChanged();
+    // виртуальный монитор второго экрана: state — open (создан) | closing (сейчас будет удалён: NameLess UI убирает с него свои окна)
+    void virtualScreen(const QString &output, const QString &state, const QString &peer, const QString &kind);
     void shareOffered(const QString &deviceId, const QString &name);       // устройство хочет показать свой экран мне — нужен ответ человека
     void statsChanged();
     void shareDeclinedByPeer(const QString &deviceId);
@@ -261,6 +265,7 @@ private:
     void beginViewing(const QString &deviceId);       // общее начало просмотра (обычного и «второго экрана»)
     void releaseSecondScreen();                       // убрать виртуальный монитор / вернуть ввод на основной экран
     struct SecondSpec { int w = 1920, h = 1080, fps = 60; double scale = 1.0; bool scaleAuto = true; QString side = QStringLiteral("right"); QString mode = QStringLiteral("extend"); QString workspace; };      // mode: extend — новый монитор, mirror — повтор существующего
+    void startSecondShare(const QString &deviceId, const SecondSpec &spec, const QString &source);      // монитор готов — начать показ на него
     QHash<QString, QString> m_ssOffered;              // хозяин: кому предложен второй экран (и какое окно driftwm выбрано) — запрос от него принимается без вопроса
     QHash<QString, QVariantMap> m_ssOfferSpec;        // зритель: что предложил компьютер (ориентация, разрешение, частота, сторона)
     QHash<QString, SecondSpec> m_ssPending;           // запросы второго экрана, ждущие ответа хозяина
@@ -283,7 +288,10 @@ private:
     QString m_shareSource;                            // что показывается сейчас: имя экрана, «window:…», пусто — основной
     QTimer m_ssKeep;                                  // следит, чтобы на виртуальном мониторе оставался только выбранный стол
     QString m_ssWorkspace;
+    int m_ssGen = 0;
+    QString m_secondScreenName;                       // зритель: экран, по размеру которого запрошен второй экран (на нём и открывается окно)                                  // номер попытки создать монитор: отменённая попытка свой монитор убирает
     QString m_ssOutput;                               // хозяин: имя виртуального монитора (Hyprland)
+    QString m_ssPeer;                                 // хозяин: чей это второй экран
     int m_ssFps = 0, m_ssWidth = 0;                   // хозяин: пока идёт второй экран — его частота и ширина кадра вместо общих настроек
     bool m_secondViewing = false;                     // зритель: идёт второй экран
     int m_secondOrient = 1;

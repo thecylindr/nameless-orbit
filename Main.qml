@@ -21,7 +21,11 @@ ApplicationWindow {
     }
 
     // кнопка «Назад» на телефоне возвращает на страницу выше, а закрывает программу только на главной
-    onClosing: close => { if (IsMobile && stack.depth > 1) { close.accepted = false; stack.pop(); } }
+    // «Назад»: на вложенной странице — шаг назад; на главной при работе в фоне — свернуть (закрытие окна останавливало Orbit целиком)
+    onClosing: close => {
+        if (IsMobile && stack.depth > 1) { close.accepted = false; stack.pop(); }
+        else if (IsMobile && Settings.keepRunning) { close.accepted = false; Settings.moveToBack(); }
+    }
 
     // Android рисует под строкой состояния, вырезом и жестовой панелью — свободную область сообщает система
     Item { id: safe; anchors.fill: parent }
@@ -85,7 +89,12 @@ ApplicationWindow {
     function showScreen(id) {
         if (screenWin.visible) return;
         // второй экран на компьютере — отдельное окно на весь экран: главное окно остаётся как было и не теряет полный экран при выводе вперёд
-        if (!IsMobile && RemoteDesktop.secondScreen) { detachScreen(id); screenWin.visibility = Window.FullScreen; return; }
+        if (!IsMobile && RemoteDesktop.secondScreen) {
+            // окно — на тот экран, по размеру которого запрошен второй экран: иначе картинка вписывалась в чужой монитор с полями
+            for (let i = 0; i < Qt.application.screens.length; ++i)
+                if (Qt.application.screens[i].name === RemoteDesktop.secondScreenName) screenWin.screen = Qt.application.screens[i];
+            detachScreen(id); screenWin.visibility = Window.FullScreen; return;
+        }
         if (stack.currentItem && stack.currentItem.isScreen === true) return;
         stack.push(screenPage, { deviceId: id });
     }

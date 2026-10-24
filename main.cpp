@@ -1,7 +1,7 @@
 // NameLess Orbit — связь между своими устройствами в локальной сети: обнаружение, сопряжение, буфер обмена,
 // уведомления, батарея, медиа, команды, демонстрация и управление экраном. Подробно — в README.md.
 #ifndef APP_VERSION_STR
-#define APP_VERSION_STR "0.2.5"
+#define APP_VERSION_STR "0.2.6"
 #endif
 
 #include <QGuiApplication>
@@ -34,6 +34,7 @@
 #include "plugins/SharePlugin.h"
 #include "remote/RemoteDesktopController.h"
 #include "remote/EdgeCrossing.h"
+#include "remote/KWinBridge.h"
 #include "remote/VirtualDisplay.h"
 #include "remote/HyprIpc.h"
 #include "remote/FrameView.h"
@@ -116,7 +117,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // Only the primary instance may remove an orphaned virtual output.
+    // осиротевший виртуальный монитор убирает только основной экземпляр
     VirtualDisplay::cleanupStale();
 
     if (settings.discoveryOnStart()) peerManager.setDiscoveryActive(true);
@@ -138,9 +139,11 @@ int main(int argc, char *argv[])
         PlatformBridge::setBackgroundStatus(names.isEmpty() ? QStringLiteral("Нет связи — ищу устройства") : QStringLiteral("Подключено: ") + names.join(QStringLiteral(", ")));
     });
 #if defined(Q_OS_ANDROID)
-    if (settings.keepRunning()) PlatformBridge::startBackgroundService();
+    if (settings.keepRunning()) PlatformBridge::startBackgroundService(!settings.backgroundNotice());
     QObject::connect(&settings, &SettingsManager::keepRunningChanged, &app, [&settings]() {
-        if (settings.keepRunning()) PlatformBridge::startBackgroundService(); else PlatformBridge::stopBackgroundService();
+        // служба перезапускается: уведомление о работе в фоне меняет канал (видимый / выключенный)
+        PlatformBridge::stopBackgroundService();
+        if (settings.keepRunning()) PlatformBridge::startBackgroundService(!settings.backgroundNotice());
     });
 #else
     app.setQuitOnLastWindowClosed(!settings.keepRunning());
@@ -210,7 +213,16 @@ int main(int argc, char *argv[])
     EdgeCrossing edgeCrossing(&peerManager);
     peerManager.registerPlugin(edgeCrossing.name(), &edgeCrossing);
     orbitDBus.setCrossing(&edgeCrossing);
+    orbitDBus.setMedia(&mediaPlugin);
+    QObject::connect(&remoteDesktop, &RemoteDesktopController::virtualScreen, &orbitDBus, [&orbitDBus](const QString &out, const QString &state, const QString &peer, const QString &kind) {
+        QJsonObject o;
+        o[QStringLiteral("output")] = out; o[QStringLiteral("state")] = state; o[QStringLiteral("peer")] = peer; o[QStringLiteral("kind")] = kind;
+        emit orbitDBus.VirtualScreen(QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
+    });
     QObject::connect(&edgeCrossing, &EdgeCrossing::errorOccurred, &app, [](const QString &m) { PlatformBridge::postNotification(QStringLiteral("Переход курсора"), m); });
+    // KDE Plasma: края экрана для перехода курсора задаются в настройках Orbit (в Hyprland их задаёт NameLess UI)
+    edgeCrossing.setKwinLinks(settings.crossLinks());
+    QObject::connect(&settings, &SettingsManager::crossLinksChanged, &app, [&]() { edgeCrossing.setKwinLinks(settings.crossLinks()); });
 
     // экран показывающего устройства рисуется своим элементом сцены (см. remote/FrameView.h); регистрируется вручную в модуле
     // приложения — QML-файлы модуля видят его без отдельного import
@@ -239,6 +251,7 @@ int main(int argc, char *argv[])
     ctx->setContextProperty(QStringLiteral("IsMobile"), false);
 #endif
     ctx->setContextProperty(QStringLiteral("AppVersion"), QStringLiteral(APP_VERSION_STR));
+    ctx->setContextProperty(QStringLiteral("KWinSession"), KWinBridge::isKWin());      // KDE Plasma: свои настройки перехода курсора
 
     // --background: без окна, только связь (запускает NameLess UI, когда нужны устройства); окно — по Show() из D-Bus
     ctx->setContextProperty(QStringLiteral("StartHidden"), app.arguments().contains(QStringLiteral("--background")));

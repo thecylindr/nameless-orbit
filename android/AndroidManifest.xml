@@ -74,6 +74,17 @@
             android:stopWithTask="true"
             android:foregroundServiceType="mediaProjection" />
 
+        <!-- доступ к уведомлениям: только чтобы видеть медиасессии (что играет на телефоне) — уведомления Orbit не читает -->
+        <service
+            android:name="org.glassrice.namelessorbit.OrbitMedia$Listener"
+            android:label="Orbit: что играет"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.qtprovider"

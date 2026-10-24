@@ -29,6 +29,10 @@ import java.io.OutputStream;
 // Сама связь живёт в Qt-части приложения; служба только удерживает процесс. Статические методы вызываются из C++ (PlatformBridge)
 public class OrbitService extends Service {
     private static final String CH_SERVICE = "orbit_service";
+    // канал скрытого уведомления: создаётся сразу выключенным (IMPORTANCE_NONE) — служба переднего плана работает, а в шторке и строке
+    // состояния ничего нет. Важность канала приложение поднять потом не может, поэтому «видно / не видно» — два разных канала
+    private static final String CH_HIDDEN = "orbit_service_hidden";
+    private static boolean quiet = true;          // уведомление о работе в фоне скрыто (настройка Orbit, по умолчанию)
     private static final String CH_EVENTS = "orbit_events";
     private static final int ID_SERVICE = 1;
     private static int nextEventId = 100;
@@ -38,7 +42,7 @@ public class OrbitService extends Service {
     private static boolean alive = false;
 
     private static Notification buildOngoing(Context c) {
-        return new Notification.Builder(c, CH_SERVICE)
+        return new Notification.Builder(c, quiet ? CH_HIDDEN : CH_SERVICE)
             .setContentTitle("NameLess Orbit")
             .setContentText(status)
             .setSmallIcon(smallIcon(c))
@@ -66,6 +70,7 @@ public class OrbitService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         // тихий канал для постоянного уведомления службы
         nm.createNotificationChannel(new NotificationChannel(CH_SERVICE, "Фоновая работа", NotificationManager.IMPORTANCE_MIN));
+        nm.createNotificationChannel(new NotificationChannel(CH_HIDDEN, "Фоновая работа (скрыто)", NotificationManager.IMPORTANCE_NONE));
 
         Notification n = buildOngoing(this);
         // Android 12+ не даёт службе стать «переднего плана», если её запустила система из фона (перезапуск после убийства процесса, спящий режим):
@@ -117,7 +122,9 @@ public class OrbitService extends Service {
     }
 
     // ---------- вызывается из C++ ----------
-    public static void start(Context c) {
+    // quiet — уведомление о работе в фоне не показывается (выключенный канал)
+    public static void start(Context c, boolean quietNotice) {
+        quiet = quietNotice;
         Intent i = new Intent(c, OrbitService.class);
         try {
             if (Build.VERSION.SDK_INT >= 26) c.startForegroundService(i); else c.startService(i);

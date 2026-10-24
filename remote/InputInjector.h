@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QRectF>
+#include <QPointF>
 #include <QString>
 #include <QTimer>
 
@@ -51,6 +52,8 @@ public slots:
     // событие evdev как есть (переход курсора: клавиши, кнопки, смещения и колесо другой машины); rawSync — конец пачки
     void rawEvent(quint16 type, quint16 code, qint32 value);
     void rawSync();
+    // курсор — в точку раскладки (логические пиксели): Hyprland — своей командой, KDE Plasma — абсолютным устройством. false — не вышло
+    bool warpLayout(const QPointF &p);
 
 signals:
     void openChanged();

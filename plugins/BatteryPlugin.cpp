@@ -6,10 +6,27 @@
 #include <QDBusInterface>
 #include <QDBusReply>
 #include <QDBusConnection>
+#include <QDir>
+#include <QFile>
 #endif
 
 namespace {
 constexpr int POLL_INTERVAL_MS = 30000;
+
+#ifdef ORBIT_DESKTOP_LINUX
+// яркость встроенного экрана: первая подсветка в /sys/class/backlight (у ПК её нет — -1)
+int backlightPercent()
+{
+    const QDir dir(QStringLiteral("/sys/class/backlight"));
+    for (const QString &n : dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        QFile cur(dir.filePath(n) + QStringLiteral("/brightness")), max(dir.filePath(n) + QStringLiteral("/max_brightness"));
+        if (!cur.open(QIODevice::ReadOnly) || !max.open(QIODevice::ReadOnly)) continue;
+        const int c = cur.readAll().trimmed().toInt(), m = max.readAll().trimmed().toInt();
+        if (m > 0) return qBound(0, qRound(c * 100.0 / m), 100);
+    }
+    return -1;
+}
+#endif
 }
 
 BatteryPlugin::BatteryPlugin(PeerManager *manager, QObject *parent)
@@ -38,33 +55,43 @@ void BatteryPlugin::refreshLocal()
     // UPower: DisplayDevice агрегирует все батареи системы в одно значение (так же делает Quickshell-UPower в NameLess UI)
     QDBusInterface dev(QStringLiteral("org.freedesktop.UPower"), QStringLiteral("/org/freedesktop/UPower/devices/DisplayDevice"),
                        QStringLiteral("org.freedesktop.DBus.Properties"), QDBusConnection::systemBus());
-    if (!dev.isValid()) return;
-    QDBusReply<QVariant> pct = dev.call(QStringLiteral("Get"), QStringLiteral("org.freedesktop.UPower.Device"), QStringLiteral("Percentage"));
-    QDBusReply<QVariant> state = dev.call(QStringLiteral("Get"), QStringLiteral("org.freedesktop.UPower.Device"), QStringLiteral("State"));
-    if (pct.isValid()) m_percent = int(pct.value().toDouble());
-    if (state.isValid()) m_charging = (state.value().toUInt() == 1);   // 1 = Charging (enum UPower.Device.State)
+    m_brightness = backlightPercent();
+    if (dev.isValid()) {
+        // у ПК без батареи сводное устройство есть, но IsPresent = false и заряд 0 — тогда заряд не показывается
+        QDBusReply<QVariant> present = dev.call(QStringLiteral("Get"), QStringLiteral("org.freedesktop.UPower.Device"), QStringLiteral("IsPresent"));
+        QDBusReply<QVariant> pct = dev.call(QStringLiteral("Get"), QStringLiteral("org.freedesktop.UPower.Device"), QStringLiteral("Percentage"));
+        QDBusReply<QVariant> state = dev.call(QStringLiteral("Get"), QStringLiteral("org.freedesktop.UPower.Device"), QStringLiteral("State"));
+        const bool has = present.isValid() && present.value().toBool();
+        m_percent = has && pct.isValid() ? int(pct.value().toDouble()) : -1;
+        m_charging = has && state.isValid() && (state.value().toUInt() == 1 || state.value().toUInt() == 4);   // 1 — заряжается, 4 — заряжена
+    }
     emit localChanged();
 #else
     const PlatformBridge::BatteryState b = PlatformBridge::battery();
-    if (b.percent < 0) return;
     m_percent = b.percent;
     m_charging = b.charging;
+    m_brightness = PlatformBridge::screenBrightness();
     emit localChanged();
 #endif
 }
 
 void BatteryPlugin::broadcastLocal()
 {
-    if (!isEnabled() || m_percent < 0) return;
+    if (!isEnabled() || (m_percent < 0 && m_brightness < 0)) return;
     QJsonObject payload;
-    payload[QStringLiteral("percent")] = m_percent;
+    payload[QStringLiteral("percent")] = m_percent;            // -1 — батареи нет (ПК): у получателя заряд не показывается
     payload[QStringLiteral("charging")] = m_charging;
+    payload[QStringLiteral("brightness")] = m_brightness;
     m_manager->broadcastPlugin(name(), payload, name());
 }
 
 void BatteryPlugin::handleMessage(const QString &deviceId, const QJsonObject &payload)
 {
     if (!isEnabled()) return;
-    m_remote.insert(deviceId, {payload.value(QStringLiteral("percent")).toInt(-1), payload.value(QStringLiteral("charging")).toBool()});
+    State st;
+    st.percent = payload.value(QStringLiteral("percent")).toInt(-1);
+    st.charging = payload.value(QStringLiteral("charging")).toBool();
+    st.brightness = payload.value(QStringLiteral("brightness")).toInt(-1);
+    m_remote.insert(deviceId, st);
     emit remoteChanged(deviceId);
 }

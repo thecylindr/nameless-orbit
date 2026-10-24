@@ -1,4 +1,6 @@
 #include "VirtualDisplay.h"
+#include "HyprIpc.h"
+#include "KWinBridge.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -11,7 +13,9 @@
 #include <QSet>
 #include <QStandardPaths>
 #include <QThread>
+#include <QTimer>
 #include <QVariantMap>
+#include <atomic>
 
 #if defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID)
 
@@ -27,11 +31,32 @@ bool run(const QString &prog, const QStringList &args, QByteArray *out = nullptr
     return p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
 }
 
-QJsonArray hyprMonitors()
+// запрос к Hyprland: через его сокет (~1 мс, без процесса); сокет не ответил — процессом hyprctl.
+// Раньше каждый запрос был отдельным hyprctl, а создание монитора делало их два десятка подряд — окно Orbit замирало
+QByteArray hyprJson(const char *what)
 {
-    QByteArray o;
-    if (!run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("monitors")}, &o)) return {};
-    return QJsonDocument::fromJson(o).array();
+    QByteArray o = HyprIpc::request(QByteArray("j/") + what);
+    if (o.isEmpty()) run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QString::fromLatin1(what)}, &o);
+    return o;
+}
+
+QJsonArray hyprMonitors() { return QJsonDocument::fromJson(hyprJson("monitors")).array(); }
+
+void dispatch(const QString &lua)
+{
+    if (HyprIpc::request("dispatch " + lua.toUtf8()).isEmpty()) run(QStringLiteral("hyprctl"), {QStringLiteral("dispatch"), lua});
+}
+
+void outputRemove(const QString &name)
+{
+    if (HyprIpc::request("output remove " + name.toUtf8(), 1500).isEmpty()) run(QStringLiteral("hyprctl"), {QStringLiteral("output"), QStringLiteral("remove"), name});
+}
+
+// монитор по имени из списка Hyprland; пусто — его нет
+QJsonObject monitorByName(const QString &name)
+{
+    for (const QJsonValue &v : hyprMonitors()) if (v.toObject().value(QStringLiteral("name")).toString() == name) return v.toObject();
+    return {};
 }
 
 QString stateFile() { return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + QStringLiteral("/secondscreen.json"); }
@@ -44,21 +69,22 @@ void remember(const QString &name)
     if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) f.write(name.toUtf8());
 }
 // Страж: отдельный процесс, переживающий Orbit. Если Orbit убит (kill -9, падение, принудительное закрытие показа), виртуальный монитор остался бы в Hyprland:
-// курсор и окна уходили на невидимый экран, рабочий стол не возвращался, захват висел. Страж ждёт смерти Orbit и, если файл «осталось от запуска» ещё
-// содержит имя монитора (при штатном выходе destroy() его стирает), убирает монитор и добивает осиротевший wf-recorder этого монитора
-void guard(const QString &name)
+// курсор и окна уходили на невидимый экран, рабочий стол не возвращался, захват висел. Страж ждёт смерти Orbit и, если файл «осталось от запуска»
+// ещё содержит имя монитора (при штатном выходе destroy() его стирает), убирает монитор и добивает осиротевший wf-recorder этого монитора.
+// Имя читается из файла в момент смерти: у каждого второго экрана своё имя, а страж один на запуск
+void guard()
 {
-    static bool started = false;          // один страж на запуск Orbit: имя монитора всегда одно, а файл-метка перезаписывается при каждом создании
+    static bool started = false;
     if (started) return;
     started = true;
     const QString script = QStringLiteral(
-        "pid=\"$1\"; name=\"$2\"; state=\"$3\"; "
+        "pid=\"$1\"; state=\"$2\"; "
         "while kill -0 \"$pid\" 2>/dev/null; do sleep 1; done; "
-        "sleep 1; [ \"$(cat \"$state\" 2>/dev/null)\" = \"$name\" ] || exit 0; "
+        "sleep 1; name=\"$(cat \"$state\" 2>/dev/null)\"; case \"$name\" in HEADLESS*) ;; *) exit 0 ;; esac; "
         "for p in $(pgrep -x wf-recorder); do tr '\\0' ' ' < /proc/$p/cmdline 2>/dev/null | grep -q -- \" -o $name \" && kill \"$p\" 2>/dev/null; done; "
-        "hyprctl output remove \"$name\" >/dev/null 2>&1; rm -f \"$state\"");
+        "sleep 0.3; hyprctl output remove \"$name\" >/dev/null 2>&1; rm -f \"$state\"");
     QProcess::startDetached(QStringLiteral("sh"), {QStringLiteral("-c"), script, QStringLiteral("orbit-guard"),
-                                                   QString::number(QCoreApplication::applicationPid()), name, stateFile()});
+                                                   QString::number(QCoreApplication::applicationPid()), stateFile()});
 }
 
 
@@ -86,6 +112,7 @@ Backend backend()
     static bool known = false;
     if (known) return cached;
     if (!qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) cached = Backend::Hyprland;
+    else if (KWinBridge::isKWin()) cached = Backend::KWin;
     else if (qEnvironmentVariable("XDG_CURRENT_DESKTOP").contains(QLatin1String("driftwm"), Qt::CaseInsensitive)
              || qEnvironmentVariable("XDG_SESSION_DESKTOP").contains(QLatin1String("driftwm"), Qt::CaseInsensitive)) cached = Backend::Driftwm;
     else if (!driftwmState().isEmpty()) cached = Backend::Driftwm;        // IPC driftwm отвечает — значит, это он
@@ -98,6 +125,7 @@ QString backendName()
     switch (backend()) {
     case Backend::Hyprland: return QStringLiteral("Hyprland");
     case Backend::Driftwm: return QStringLiteral("driftwm (бета)");
+    case Backend::KWin: return QStringLiteral("KDE Plasma");
     default: return QString();
     }
 }
@@ -105,6 +133,7 @@ QString backendName()
 QStringList monitorNames()
 {
     QStringList out;
+    if (backend() == Backend::KWin) { for (const QScreen *s : QGuiApplication::screens()) out << s->name(); return out; }
     if (backend() != Backend::Hyprland) return out;
     for (const QJsonValue &v : hyprMonitors()) {
         const QString n = v.toObject().value(QStringLiteral("name")).toString();
@@ -113,13 +142,17 @@ QStringList monitorNames()
     return out;
 }
 
-bool create(const Spec &spec, QString *outName, QString *error)
+bool create(const Spec &spec, QString *outName, QSize *outSize, QString *error)
 {
     if (backend() != Backend::Hyprland) { if (error) *error = QStringLiteral("виртуальный монитор поддерживает только Hyprland"); return false; }
+    // прошлый второй экран ещё снимается с раскладки (destroy убирает его с паузой после остановки захвата) — ждём, потом убираем остатки
+    for (const QJsonValue &v : hyprMonitors())
+        if (v.toObject().value(QStringLiteral("name")).toString().startsWith(QLatin1String("HEADLESS-ORBIT"))) { QThread::msleep(400); break; }
     cleanupStale();
     QJsonObject main;
     bool anchored = false;
-    for (const QJsonValue &v : hyprMonitors()) {
+    const QJsonArray before = hyprMonitors();
+    for (const QJsonValue &v : before) {
         const QJsonObject m = v.toObject();
         const QString mn = m.value(QStringLiteral("name")).toString();
         if (mn.startsWith(QLatin1String("HEADLESS"))) continue;
@@ -127,30 +160,28 @@ bool create(const Spec &spec, QString *outName, QString *error)
         else if (!anchored && (main.isEmpty() || m.value(QStringLiteral("focused")).toBool())) main = m;
     }
     if (main.isEmpty()) { if (error) *error = QStringLiteral("не найден основной монитор"); return false; }
-    // место и размер задаются правилом ДО создания монитора, а имя выбирается самим: без правила Hyprland на мгновение ставил новый выход
-    // поверх основного и показывал ошибку «монитор перекрывает другие»
-    const double scale = qMax(0.1, main.value(QStringLiteral("scale")).toDouble(1.0));
-    Q_UNUSED(scale);
-    const int W = qBound(640, spec.width, 3840), H = qBound(360, spec.height, 2400), F = qBound(24, spec.fps, 120);
+    // место и размер задаются правилом ДО создания монитора: без правила Hyprland на мгновение ставил новый выход поверх основного
+    const int W = qBound(640, spec.width, 3840), H = qBound(360, spec.height, 3840), F = qBound(24, spec.fps, 120);
     QString pos = QStringLiteral("auto-right");                                  // «auto-*» — вплотную к основному, без наложения
     if (spec.side == QLatin1String("left")) pos = QStringLiteral("auto-left");
     else if (spec.side == QLatin1String("top")) pos = QStringLiteral("auto-up");
     else if (spec.side == QLatin1String("bottom")) pos = QStringLiteral("auto-down");
-    const QString name = QStringLiteral("HEADLESS-ORBIT");
-    run(QStringLiteral("hyprctl"), {QStringLiteral("output"), QStringLiteral("remove"), name});      // остаток прошлого запуска, если он есть
+    // своё имя у каждого второго экрана: удаление прошлого монитора (оно идёт с задержкой, см. destroy) не может снести новый с тем же именем
+    static std::atomic<int> seq{0};
+    const QString name = QStringLiteral("HEADLESS-ORBIT-%1").arg(++seq);
     // Hyprland принимает только масштаб, при котором размер делится нацело; иначе подставляет свой (1,5 → 2) — выбирается ближайший подходящий
     double useScale = 1.0, bestDiff = 1e9;
     for (double c = 1.0; c <= 3.0001; c += 0.25) {
         if (qAbs(W / c - qRound(W / c)) > 1e-6 || qAbs(H / c - qRound(H / c)) > 1e-6) continue;
         if (qAbs(c - spec.scale) < bestDiff) { bestDiff = qAbs(c - spec.scale); useScale = c; }
     }
+    auto rectOf = [](const QJsonObject &m) {
+        const double s = qMax(0.1, m.value(QStringLiteral("scale")).toDouble(1.0));
+        return QRect(m.value(QStringLiteral("x")).toInt(), m.value(QStringLiteral("y")).toInt(),
+                     int(m.value(QStringLiteral("width")).toDouble() / s), int(m.value(QStringLiteral("height")).toDouble() / s));
+    };
     // выбран конкретный монитор: новый ставится вплотную к его стороне, если там свободно, иначе Hyprland ставит сам («auto-*»)
     if (anchored) {
-        auto rectOf = [](const QJsonObject &m) {
-            const double s = qMax(0.1, m.value(QStringLiteral("scale")).toDouble(1.0));
-            return QRect(m.value(QStringLiteral("x")).toInt(), m.value(QStringLiteral("y")).toInt(),
-                         int(m.value(QStringLiteral("width")).toDouble() / s), int(m.value(QStringLiteral("height")).toDouble() / s));
-        };
         const QRect a = rectOf(main);
         const int lw = int(W / useScale), lh = int(H / useScale);
         QRect cand(a.right() + 1, a.y(), lw, lh);
@@ -158,19 +189,18 @@ bool create(const Spec &spec, QString *outName, QString *error)
         else if (spec.side == QLatin1String("top")) cand = QRect(a.x(), a.y() - lh, lw, lh);
         else if (spec.side == QLatin1String("bottom")) cand = QRect(a.x(), a.bottom() + 1, lw, lh);
         bool free = true;
-        for (const QJsonValue &v : hyprMonitors()) {
+        for (const QJsonValue &v : before) {
             const QJsonObject m = v.toObject();
             if (m.value(QStringLiteral("name")).toString().startsWith(QLatin1String("HEADLESS"))) continue;
             if (rectOf(m).intersects(cand)) free = false;
         }
         if (free) pos = QStringLiteral("%1x%2").arg(cand.x()).arg(cand.y());
     }
-    // Куда вернуть пользователя после создания: Hyprland отдаёт новому выходу фокус, курсор и рабочий стол с номером «ID+1» (чаще всего 2) вместе с окнами —
-    // у пользователя на глазах экран «перекидывало». Правило hl.workspace_rule для этого не годится: через eval оно не снимается и копится,
-    // каждый выбранный раньше стол потом снова притягивался к виртуальному монитору (баг «уезжают все окна, кроме первого стола»).
+    // Куда вернуть пользователя после создания: Hyprland отдаёт новому выходу фокус, курсор и рабочий стол «ID+1» вместе с окнами.
+    // Правило hl.workspace_rule для этого не годится: через eval оно не снимается и копится
     QString homeMon = main.value(QStringLiteral("name")).toString();
     int homeWs = 0;
-    for (const QJsonValue &v : hyprMonitors()) {
+    for (const QJsonValue &v : before) {
         const QJsonObject m = v.toObject();
         if (m.value(QStringLiteral("focused")).toBool() && !m.value(QStringLiteral("name")).toString().startsWith(QLatin1String("HEADLESS"))) {
             homeMon = m.value(QStringLiteral("name")).toString();
@@ -179,11 +209,8 @@ bool create(const Spec &spec, QString *outName, QString *error)
     }
     QPoint homeCursor(-1, -1);
     {
-        QByteArray co;
-        if (run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("cursorpos")}, &co)) {
-            const QJsonObject c = QJsonDocument::fromJson(co).object();
-            homeCursor = QPoint(c.value(QStringLiteral("x")).toInt(), c.value(QStringLiteral("y")).toInt());
-        }
+        const QJsonObject c = QJsonDocument::fromJson(hyprJson("cursorpos")).object();
+        if (c.contains(QStringLiteral("x"))) homeCursor = QPoint(c.value(QStringLiteral("x")).toInt(), c.value(QStringLiteral("y")).toInt());
     }
     bool wsNum = false;
     const int wsId = spec.workspace.toInt(&wsNum);
@@ -194,45 +221,45 @@ bool create(const Spec &spec, QString *outName, QString *error)
         if (error) *error = QStringLiteral("hyprctl не создал виртуальный монитор");
         return false;
     }
-    bool seen = false;
-    for (int attempt = 0; attempt < 12 && !seen; ++attempt) {                    // выход появляется не мгновенно
-        for (const QJsonValue &v : hyprMonitors()) if (v.toObject().value(QStringLiteral("name")).toString() == name) seen = true;
-        if (!seen) QThread::msleep(100);
+    remember(name);                                                          // с этой минуты монитор есть: при падении Orbit его уберёт страж
+    guard();
+    QJsonObject mon;
+    for (int attempt = 0; attempt < 20 && mon.isEmpty(); ++attempt) {        // выход появляется не мгновенно
+        mon = monitorByName(name);
+        if (mon.isEmpty()) QThread::msleep(60);
     }
-    if (!seen) { if (error) *error = QStringLiteral("виртуальный монитор не появился"); return false; }
+    if (mon.isEmpty()) { outputRemove(name); remember(QString()); if (error) *error = QStringLiteral("виртуальный монитор не появился"); return false; }
+    // Проверка размера: Hyprland иногда создаёт выход с режимом по умолчанию (правило применилось позже, режим не принят) —
+    // тогда кадр не совпадал с экраном зрителя и второй экран занимал его не целиком. Правило применяется повторно
+    auto pixelSize = [](const QJsonObject &m) { return QSize(m.value(QStringLiteral("width")).toInt(), m.value(QStringLiteral("height")).toInt()); };
+    for (int attempt = 0; attempt < 3 && pixelSize(mon) != QSize(W, H); ++attempt) {
+        run(QStringLiteral("hyprctl"), {QStringLiteral("eval"), lua});
+        QThread::msleep(150);
+        const QJsonObject again = monitorByName(name);
+        if (!again.isEmpty()) mon = again;
+    }
+    const QSize got = pixelSize(mon);
+    if (outSize) *outSize = got.isValid() && !got.isEmpty() ? got : QSize(W, H);
     // раскладка столов: на виртуальном мониторе — только выбранный стол (или отдельный «orbit»), остальные остаются на основном
     {
-        auto dispatch = [](const QString &lua) { run(QStringLiteral("hyprctl"), {QStringLiteral("dispatch"), lua}); };
-        int gotWs = 0;                                                       // стол, который Hyprland выдал новому выходу сам
-        for (const QJsonValue &v : hyprMonitors()) {
-            const QJsonObject m = v.toObject();
-            if (m.value(QStringLiteral("name")).toString() == name) gotWs = m.value(QStringLiteral("activeWorkspace")).toObject().value(QStringLiteral("id")).toInt();
-        }
+        const int gotWs = mon.value(QStringLiteral("activeWorkspace")).toObject().value(QStringLiteral("id")).toInt();      // стол, который Hyprland выдал новому выходу сам
         const bool keep = numberedWs && gotWs == wsId;
         if (!keep && gotWs > 0)                                              // чужой стол с окнами — обратно на основной монитор
             dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = %1, monitor = \"%2\" })").arg(gotWs).arg(homeMon));
         if (!keep) {
             dispatch(QStringLiteral("hl.dsp.focus({ monitor = \"%1\" })").arg(name));          // возврат чужого стола увёл фокус на основной
             bool exists = false;                                              // стол уже есть (с окнами) на другом мониторе — переносим, иначе создаём на этом
-            if (numberedWs) {
-                QByteArray wo;
-                if (run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("workspaces")}, &wo))
-                    for (const QJsonValue &w : QJsonDocument::fromJson(wo).array()) if (w.toObject().value(QStringLiteral("id")).toInt() == wsId) exists = true;
-            }
+            if (numberedWs)
+                for (const QJsonValue &w : QJsonDocument::fromJson(hyprJson("workspaces")).array()) if (w.toObject().value(QStringLiteral("id")).toInt() == wsId) exists = true;
             if (numberedWs && exists) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = %1, monitor = \"%2\" })").arg(wsId).arg(name));
             else dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(numberedWs ? QString::number(wsId) : QStringLiteral("\"name:orbit\"")));
         }
-        // проверка: когда нужный стол переносят или он пустеет и исчезает, Hyprland подставляет монитору следующий свободный номер (3, 4…) —
-        // если на виртуальном мониторе не тот стол, выбирается нужный заново (с короткой паузой на пересборку)
+        // проверка: когда нужный стол переносят или он пустеет, Hyprland подставляет монитору следующий свободный номер — выбирается нужный заново
         const QString wantName = numberedWs ? QString::number(wsId) : QStringLiteral("orbit");
         for (int attempt = 0; attempt < 4; ++attempt) {
-            QString haveName;
-            for (const QJsonValue &v : hyprMonitors()) {
-                const QJsonObject m = v.toObject();
-                if (m.value(QStringLiteral("name")).toString() == name) haveName = m.value(QStringLiteral("activeWorkspace")).toObject().value(QStringLiteral("name")).toString();
-            }
+            const QString haveName = monitorByName(name).value(QStringLiteral("activeWorkspace")).toObject().value(QStringLiteral("name")).toString();
             if (haveName == wantName) break;
-            QThread::msleep(150);
+            QThread::msleep(120);
             dispatch(QStringLiteral("hl.dsp.focus({ monitor = \"%1\" })").arg(name));
             dispatch(QStringLiteral("hl.dsp.focus({ workspace = %1 })").arg(numberedWs ? QString::number(wsId) : QStringLiteral("\"name:orbit\"")));
         }
@@ -251,8 +278,6 @@ bool create(const Spec &spec, QString *outName, QString *error)
                 run(QStringLiteral("hyprctl"), {QStringLiteral("hyprpaper"), QStringLiteral("wallpaper"), name + QLatin1Char(',') + img});
         }
     }
-    remember(name);
-    guard(name);
     *outName = name;
     return true;
 }
@@ -267,39 +292,50 @@ void keepWorkspace(const QString &outName, const QString &workspace)
         const QJsonObject m = v.toObject();
         const QString n = m.value(QStringLiteral("name")).toString();
         if (n == outName) {
+            // пользователь сейчас работает на втором экране (фокус на нём): столы не трогаются — раньше Orbit «отбирал» стол, едва его открывали,
+            // и экраны перекидывало туда-обратно
+            if (m.value(QStringLiteral("focused")).toBool()) return;
             const QJsonObject w = m.value(QStringLiteral("activeWorkspace")).toObject();
             have = w.value(QStringLiteral("name")).toString();
             haveId = w.value(QStringLiteral("id")).toInt();
         } else if (!n.startsWith(QLatin1String("HEADLESS")) && (home.isEmpty() || m.value(QStringLiteral("focused")).toBool())) home = n;
     }
     if (have.isEmpty() || have == want || home.isEmpty()) return;
-    // на виртуальный монитор попал чужой стол (Super+N при фокусе на нём, окно открылось по правилу) — он возвращается на настоящий монитор,
-    // а выбранный стол снова встаёт на виртуальный; фокус и курсор пользователя не трогаются
-    auto dispatch = [](const QString &lua) { run(QStringLiteral("hyprctl"), {QStringLiteral("dispatch"), lua}); };
+    // на виртуальный монитор попал чужой стол (окно открылось по правилу) — он возвращается на настоящий монитор, выбранный стол встаёт на место
     if (haveId > 0) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = %1, monitor = \"%2\" })").arg(haveId).arg(home));
     bool exists = false;
-    QByteArray wo;
-    if (run(QStringLiteral("hyprctl"), {QStringLiteral("-j"), QStringLiteral("workspaces")}, &wo))
-        for (const QJsonValue &w : QJsonDocument::fromJson(wo).array()) if (w.toObject().value(QStringLiteral("name")).toString() == want) exists = true;
+    for (const QJsonValue &w : QJsonDocument::fromJson(hyprJson("workspaces")).array()) if (w.toObject().value(QStringLiteral("name")).toString() == want) exists = true;
     if (exists) dispatch(QStringLiteral("hl.dsp.workspace.move({ workspace = \"%1\", monitor = \"%2\" })").arg(want, outName));
 }
 
-void destroy(const QString &outName)
+void destroy(const QString &outName, bool now)
 {
     if (outName.isEmpty()) return;
-    // без ожидания: hyprctl мог отвечать секундами, пока Hyprland пересобирает мониторы, — окно Orbit в это время подвисало
-    QProcess::startDetached(QStringLiteral("hyprctl"), {QStringLiteral("output"), QStringLiteral("remove"), outName});
-    remember(QString());
+    // Монитор убирается с паузой 0,8 с: NameLess UI получил сигнал VirtualScreen «closing» и убирает с него свои окна (иначе Quickshell
+    // падал при удалении монитора с окном), а wf-recorder только что убит, и Hyprland ещё держит его кадр этого выхода —
+    // удаление выхода с незавершённым захватом роняло или подвешивало композитор. Отдельным процессом: окно Orbit не ждёт пересборки мониторов
+    const QString script = now ? QStringLiteral("hyprctl output remove \"$1\" >/dev/null 2>&1")
+                               : QStringLiteral("sleep 0.8; hyprctl output remove \"$1\" >/dev/null 2>&1");
+    QProcess::startDetached(QStringLiteral("sh"), {QStringLiteral("-c"), script, QStringLiteral("orbit-remove"), outName});
+    QFile f(stateFile());
+    if (f.open(QIODevice::ReadOnly) && QString::fromUtf8(f.readAll()).trimmed() == outName) { f.close(); remember(QString()); }
 }
 
 void cleanupStale()
 {
+    if (backend() != Backend::Hyprland) return;
     QFile f(stateFile());
-    if (!f.open(QIODevice::ReadOnly)) return;
-    const QString name = QString::fromUtf8(f.readAll()).trimmed();
-    f.close();
-    if (name.startsWith(QLatin1String("HEADLESS")) && backend() == Backend::Hyprland) run(QStringLiteral("hyprctl"), {QStringLiteral("output"), QStringLiteral("remove"), name});
-    f.remove();
+    if (f.open(QIODevice::ReadOnly)) {
+        const QString name = QString::fromUtf8(f.readAll()).trimmed();
+        f.close();
+        if (name.startsWith(QLatin1String("HEADLESS"))) outputRemove(name);
+        f.remove();
+    }
+    // мониторы Orbit, оставшиеся без метки (старые версии с общим именем HEADLESS-ORBIT, падение до записи метки)
+    for (const QJsonValue &v : hyprMonitors()) {
+        const QString n = v.toObject().value(QStringLiteral("name")).toString();
+        if (n.startsWith(QLatin1String("HEADLESS-ORBIT"))) outputRemove(n);
+    }
 }
 
 QRect outputRect(const QString &outName)
@@ -402,8 +438,8 @@ namespace VirtualDisplay {
 Backend backend() { return Backend::None; }
 QStringList monitorNames() { return {}; }
 QString backendName() { return QString(); }
-bool create(const Spec &, QString *, QString *error) { if (error) *error = QStringLiteral("второй экран есть только на Linux"); return false; }
-void destroy(const QString &) {}
+bool create(const Spec &, QString *, QSize *, QString *error) { if (error) *error = QStringLiteral("второй экран есть только на Linux"); return false; }
+void destroy(const QString &, bool) {}
 void keepWorkspace(const QString &, const QString &) {}
 void cleanupStale() {}
 QRect outputRect(const QString &) { return {}; }

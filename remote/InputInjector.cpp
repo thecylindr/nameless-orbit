@@ -1,5 +1,8 @@
 #include "InputInjector.h"
 #include "HyprIpc.h"
+#include "KWinBridge.h"
+#include <QGuiApplication>
+#include <QScreen>
 
 #ifdef ORBIT_DESKTOP_LINUX
 #include <fcntl.h>
@@ -207,6 +210,16 @@ void InputInjector::setTarget(const QString &output, const QRectF &frac)
     if (output != m_targetOutput) restoreCursor();
     m_targetOutput = output;
     m_targetFrac = frac.isValid() ? frac : QRectF(0, 0, 1, 1);
+    // KDE Plasma: абсолютное устройство KWin растягивает на всю раскладку — доли монитора-цели переводятся в доли раскладки
+    if (KWinBridge::isKWin() && !output.isEmpty()) {
+        const QRectF L = KWinBridge::layout();
+        for (const QScreen *s : QGuiApplication::screens()) {
+            if (s->name() != output || L.width() <= 0 || L.height() <= 0) continue;
+            const QRectF g = s->geometry();
+            m_targetFrac = QRectF((g.x() - L.x() + m_targetFrac.x() * g.width()) / L.width(), (g.y() - L.y() + m_targetFrac.y() * g.height()) / L.height(),
+                                  m_targetFrac.width() * g.width() / L.width(), m_targetFrac.height() * g.height() / L.height());
+        }
+    }
     m_geomAt = 0;                                      // геометрия цели спрашивается заново
 }
 
@@ -229,6 +242,31 @@ bool InputInjector::warpCursor(double nx, double ny)
     }
 #endif
     return warpCursorHyprland(nx, ny);
+}
+
+bool InputInjector::warpLayout(const QPointF &p)
+{
+    if (!qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE")) {
+        HyprIpc::request(QStringLiteral("dispatch hl.dsp.cursor.move({ x = %1, y = %2 })").arg(qRound(p.x())).arg(qRound(p.y())).toUtf8());
+        return true;
+    }
+#ifdef ORBIT_DESKTOP_LINUX
+    if (m_absFd < 0 && !openAbsolutePointer()) return false;
+    const QRectF L = KWinBridge::layout();
+    if (L.width() <= 0 || L.height() <= 0) return false;
+    auto put = [this](quint16 type, quint16 code, qint32 value) {
+        input_event ev{};
+        ev.type = type; ev.code = code; ev.value = value;
+        if (::write(m_absFd, &ev, sizeof(ev)) < 0) { }
+    };
+    put(EV_ABS, ABS_X, int(qBound(0.0, (p.x() - L.x()) / L.width(), 1.0) * 65535));
+    put(EV_ABS, ABS_Y, int(qBound(0.0, (p.y() - L.y()) / L.height(), 1.0) * 65535));
+    put(EV_SYN, SYN_REPORT, 0);
+    return true;
+#else
+    Q_UNUSED(p);
+    return false;
+#endif
 }
 
 bool InputInjector::warpCursorHyprland(double nx, double ny)

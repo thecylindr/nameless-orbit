@@ -221,6 +221,34 @@ Text { visible: RemoteDesktop.secondBackend === "Hyprland"; text: qsTr("Рядо
                 }
             }
 
+            // KDE Plasma: за каким краем экрана стоит какой компьютер (в Hyprland края задаёт NameLess UI). Край ловит скрипт KWin
+            Block { title: qsTr("Переход курсора (KDE Plasma)")
+                visible: KWinSession
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: qsTr("Курсор задержался у края экрана — мышь и клавиатура переходят на выбранный компьютер. Scroll Lock — вернуть курсор.")
+                    color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 11
+                }
+                Repeater {
+                    model: [["left", qsTr("Слева")], ["right", qsTr("Справа")], ["top", qsTr("Сверху")], ["bottom", qsTr("Снизу")]]
+                    Column {
+                        id: sideRow
+                        required property var modelData
+                        width: parent.width; spacing: 6
+                        function pick(dev) { const m = Object.assign({}, Settings.crossLinks); if (dev === "") delete m[sideRow.modelData[0]]; else m[sideRow.modelData[0]] = dev; Settings.crossLinks = m; }
+                        Text { text: sideRow.modelData[1]; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                        Flow {
+                            width: parent.width; spacing: 8
+                            Common.GlassButton { text: qsTr("Никого"); primary: !Settings.crossLinks[sideRow.modelData[0]]; onClicked: sideRow.pick("") }
+                            Repeater {
+                                model: PeerManagerModel.connectedDevices.filter(d => (d.remoteCapabilities || []).indexOf("crossing") >= 0)
+                                Common.GlassButton { required property var modelData; text: modelData.name; primary: Settings.crossLinks[sideRow.modelData[0]] === modelData.deviceId; onClicked: sideRow.pick(modelData.deviceId) }
+                            }
+                        }
+                    }
+                }
+            }
+
             // звук между устройствами: приём (на этом устройстве) и отправка (звук этого компьютера — другому устройству)
             Block { title: qsTr("Звук между устройствами")
                 Text { text: qsTr("Громкость принимаемого звука"); color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 13 }
@@ -374,13 +402,31 @@ Text { visible: RemoteDesktop.secondBackend === "Hyprland"; text: qsTr("Рядо
                 }
             }
 
+            // телефон: что играет — компьютеру (название, обложка, позиция); нужен доступ к уведомлениям, Orbit читает только медиасессии
+            Block { title: qsTr("Показывать, что играет"); visible: IsMobile
+                Text {
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: Media.access ? qsTr("Включено: компьютер видит трек, обложку и позицию, и управляет плеером напрямую.")
+                                       : qsTr("Чтобы компьютер видел название трека и обложку, разрешите Orbit «Доступ к уведомлениям». Сами уведомления Orbit не читает — только плеер.")
+                    color: Media.access ? Theme.good : Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 12
+                }
+                Common.GlassButton { visible: !Media.access; text: qsTr("Разрешить"); primary: true; onClicked: Media.openAccessSettings() }
+            }
+
             Block { title: qsTr("Поведение")
                 Common.GlassSwitch { width: parent.width; label: qsTr("Искать устройства при запуске"); checked: Settings.discoveryOnStart; onToggled: v => Settings.discoveryOnStart = v }
                 Common.GlassSwitch {
                     width: parent.width
                     label: IsMobile ? qsTr("Работать в фоне") : qsTr("Работать в фоне после закрытия окна")
-                    sub: IsMobile ? qsTr("Служба с постоянным уведомлением: связь не засыпает при свёрнутом приложении") : qsTr("NameLess UI видит устройства и подключает их без окна")
+                    sub: IsMobile ? qsTr("«Назад» сворачивает Orbit, связь не засыпает при свёрнутом приложении") : qsTr("NameLess UI видит устройства и подключает их без окна")
                     checked: Settings.keepRunning; onToggled: v => Settings.keepRunning = v
+                }
+                Common.GlassSwitch {
+                    visible: IsMobile && Settings.keepRunning
+                    width: parent.width
+                    label: qsTr("Уведомление о работе в фоне")
+                    sub: qsTr("постоянная строка в шторке; выключено — Orbit работает так же, но без уведомления")
+                    checked: Settings.backgroundNotice; onToggled: v => Settings.backgroundNotice = v
                 }
                 Common.GlassButton { visible: !IsMobile; text: qsTr("Завершить Orbit"); onClicked: Qt.quit() }
                 Common.GlassSwitch { visible: !IsMobile; width: parent.width; label: qsTr("Запускать свёрнутым"); checked: Settings.startMinimized; onToggled: v => Settings.startMinimized = v }

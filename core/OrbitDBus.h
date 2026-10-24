@@ -13,14 +13,16 @@ class NotificationsPlugin;
 class SharePlugin;
 class RunCommandPlugin;
 class EdgeCrossing;
+class MediaPlugin;
 
 // Внешний интерфейс Orbit на сессионной шине D-Bus: так NameLess UI (виджет «Устройства») и любые скрипты
 // видят состояние и управляют Orbit без его окна.
 //   сервис  org.glassrice.NamelessOrbit, объект /org/glassrice/NamelessOrbit, интерфейс org.glassrice.NamelessOrbit
 //   методы  Status() → JSON, Scan(), SetDiscovery(b), Connect(id), ConnectAddress(host, port), Disconnect(id), AcceptPairing(id),
-//           RejectPairing(id), Ring(id), StopRing(id), SendClipboard(id), SendFile(id, path), RunCommand(id, commandId), ViewScreen(id), ShareScreen(id), SecondScreen(id), Notify(title, body, id|""), Show(), Quit()
+//           RejectPairing(id), Ring(id), StopRing(id), SendClipboard(id), SendFile(id, path), RunCommand(id, commandId), MediaCommand(id, action), ViewScreen(id), ShareScreen(id), SecondScreen(id), Notify(title, body, id|""), Show(), Quit()
 //           CrossTo(id, side, pos, screen) → bool — переход курсора на соседний компьютер; CrossStop() — вернуть курсор
 //   сигналы Changed() — состояние изменилось, можно перечитать Status(); отправляется вручную (notifyChanged), пачки склеиваются
+//           VirtualScreen(json) — второй экран: {output, state: open|closing, peer, kind}; NameLess UI рисует на нём небо и убирает окна до удаления
 //           Crossing(json) — курсор ушёл с края или пришёл на край ({dir: out|in|deny, side, pos, screen, peer}): по нему NameLess UI рисует эффект
 // Сопряжение подтверждает человек: NameLess UI показывает тот же код, что и окно Orbit, и вызывает AcceptPairing только по
 // нажатию. Разрешения для устройств и удалённый экран через D-Bus не управляются — они остаются в самом Orbit
@@ -36,6 +38,7 @@ public:
     void setRepliesGate(std::function<bool()> gate) { m_repliesAllowed = std::move(gate); }
     void setCodexGate(std::function<bool()> gate) { m_codexAllowed = std::move(gate); }
     void setCrossing(EdgeCrossing *crossing);
+    void setMedia(MediaPlugin *media);
     bool registerOnBus();                 // false — имя занято или шины нет (Orbit при этом работает дальше)
     QByteArray statusJson() const;        // тот же JSON отдаёт и канал SingleInstance
 
@@ -52,7 +55,9 @@ public slots:
     void StopRing(const QString &deviceId);
     void SendClipboard(const QString &deviceId);
     void SendFile(const QString &deviceId, const QString &path);
-    void RunCommand(const QString &deviceId, const QString &commandId);        // быстрая команда другого устройства (из его списка)
+    void RunCommand(const QString &deviceId, const QString &commandId);
+    // плеер устройства: playpause | next | previous (что играет — в Status(): connected[].media)
+    void MediaCommand(const QString &deviceId, const QString &action);        // быстрая команда другого устройства (из его списка)
     // уведомление на подключённые устройства: пустой deviceId — на все (так сообщается, например, что Claude закончил работу)
     void Notify(const QString &title, const QString &body, const QString &deviceId);
     // сообщение об ответе Claude (закончил / ждёт ответа) на все подключённые устройства; уходит, только если это не выключено в настройках Orbit
@@ -74,6 +79,7 @@ signals:
     void secondScreenRequested(const QString &deviceId);           // не экспортируется на шину — слушает main.cpp
     void quitRequested();                 // не экспортируется на шину — слушает main.cpp и показывает окно
     Q_SCRIPTABLE void Crossing(const QString &json);      // экспортируется: эффекты перехода курсора в NameLess UI
+    Q_SCRIPTABLE void VirtualScreen(const QString &json); // экспортируется: второй экран создан / сейчас будет удалён ({output, state, peer, kind})
 
 private:
     void notifyChanged();
@@ -86,6 +92,7 @@ private:
     SharePlugin *m_share;
     RunCommandPlugin *m_run;
     EdgeCrossing *m_crossing = nullptr;
+    MediaPlugin *m_media = nullptr;
     std::function<bool()> m_repliesAllowed;
     std::function<bool()> m_codexAllowed;
 };

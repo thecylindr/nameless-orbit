@@ -161,6 +161,33 @@ void mediaKey(const QString &action)
     }
 }
 
+QByteArray mediaJson()
+{
+    const QJniObject r = QJniObject::callStaticObjectMethod("org/glassrice/namelessorbit/OrbitMedia", "read", "(Landroid/content/Context;)Ljava/lang/String;", context().object());
+    return r.isValid() ? r.toString().toUtf8() : QByteArray();
+}
+
+bool mediaCommand(const QString &action)
+{
+    return QJniObject::callStaticMethod<jboolean>("org/glassrice/namelessorbit/OrbitMedia", "command", "(Landroid/content/Context;Ljava/lang/String;)Z",
+                                                  context().object(), QJniObject::fromString(action).object<jstring>());
+}
+
+bool mediaAccess()
+{
+    return QJniObject::callStaticMethod<jboolean>("org/glassrice/namelessorbit/OrbitMedia", "hasAccess", "(Landroid/content/Context;)Z", context().object());
+}
+
+void openMediaAccess()
+{
+    QJniObject::callStaticMethod<void>("org/glassrice/namelessorbit/OrbitMedia", "openAccessSettings", "(Landroid/content/Context;)V", context().object());
+}
+
+int screenBrightness()
+{
+    return QJniObject::callStaticMethod<jint>("org/glassrice/namelessorbit/OrbitMedia", "brightness", "(Landroid/content/Context;)I", context().object());
+}
+
 bool runAction(const QString &action)
 {
     if (action == QLatin1String("flashlight")) {
@@ -262,11 +289,16 @@ void openNotificationSettings()
     QJniObject::callStaticMethod<void>(kService, "openNotificationSettings", "(Landroid/content/Context;)V", context().object());
 }
 
-void startBackgroundService()
+void startBackgroundService(bool quietNotice)
 {
     const QJniObject ctx = context();
     QJniObject::callStaticMethod<void>(kService, "requestNotificationPermission", "(Landroid/content/Context;)V", ctx.object());
-    QJniObject::callStaticMethod<void>(kService, "start", "(Landroid/content/Context;)V", ctx.object());
+    QJniObject::callStaticMethod<void>(kService, "start", "(Landroid/content/Context;Z)V", ctx.object(), jboolean(quietNotice));
+}
+
+void moveToBack()
+{
+    QJniObject::callStaticMethod<void>("org/glassrice/namelessorbit/OrbitActivity", "moveToBack", "()V");
 }
 
 void stopBackgroundService()
@@ -305,12 +337,18 @@ void acquireMulticastLock() {}
 void vibrate(int) {}
 void cancelVibration() {}
 void setLoudVolume(bool) {}
-void startBackgroundService() {}
+void startBackgroundService(bool) {}
+void moveToBack() {}
 void stopBackgroundService() {}
 void setBackgroundStatus(const QString &) {}
 void postNotification(const QString &, const QString &, bool) {}
 void mediaKey(const QString &) {}
 bool musicActive() { return false; }
+QByteArray mediaJson() { return {}; }
+bool mediaCommand(const QString &) { return false; }
+bool mediaAccess() { return false; }
+void openMediaAccess() {}
+int screenBrightness() { return -1; }
 bool runAction(const QString &) { return false; }
 bool notificationsAllowed() { return true; }
 void requestNotificationPermission() {}
@@ -348,11 +386,17 @@ void acquireMulticastLock() {}
 void vibrate(int) {}
 void cancelVibration() {}
 void setLoudVolume(bool) {}
-void startBackgroundService() {}
+void startBackgroundService(bool) {}
+void moveToBack() {}
 void stopBackgroundService() {}
 void setBackgroundStatus(const QString &) {}
 void mediaKey(const QString &) {}
 bool musicActive() { return false; }
+QByteArray mediaJson() { return {}; }
+bool mediaCommand(const QString &) { return false; }
+bool mediaAccess() { return false; }
+void openMediaAccess() {}
+int screenBrightness() { return -1; }
 bool runAction(const QString &) { return false; }
 bool notificationsAllowed() { return true; }
 void requestNotificationPermission() {}

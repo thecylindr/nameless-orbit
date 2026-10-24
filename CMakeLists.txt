@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(nameless-orbit VERSION 0.2.5 LANGUAGES CXX)
+project(nameless-orbit VERSION 0.2.6 LANGUAGES CXX)
 add_compile_definitions(APP_VERSION_STR="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
@@ -60,6 +60,8 @@ qt_add_executable(nameless-orbit
     remote/InputInjector.cpp
     remote/HyprIpc.h
     remote/EdgeCrossing.cpp
+    remote/KWinBridge.cpp
+    remote/KWinBridge.h
     remote/KeyboardGrab.cpp
     remote/RemoteDesktopController.cpp
     remote/VideoDecoder.cpp

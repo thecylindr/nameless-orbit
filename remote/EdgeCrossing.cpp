@@ -1,5 +1,8 @@
 #include "EdgeCrossing.h"
 #include "HyprIpc.h"
+#include "KWinBridge.h"
+#include <QGuiApplication>
+#include <QScreen>
 #include "../core/PeerManager.h"
 #include "../core/TrustStore.h"
 
@@ -64,6 +67,17 @@ EdgeCrossing::EdgeCrossing(PeerManager *manager, QObject *parent)
     m_edgeT.setSingleShot(true);
     m_edgeT.setInterval(25);
     connect(&m_edgeT, &QTimer::timeout, this, &EdgeCrossing::checkEdge);
+    // KDE Plasma: края ловит скрипт KWin (у NameLess UI там нет полоски на краю); курсор задержался на краю — переход на соседа этой стороны
+    m_kwinDwell.setSingleShot(true);
+    m_kwinDwell.setInterval(260);
+    connect(&m_kwinDwell, &QTimer::timeout, this, [this]() {
+        const QString dev = m_kwinLinks.value(m_kwinSide).toString();
+        if (!dev.isEmpty() && m_to.isEmpty() && m_from.isEmpty()) crossTo(dev, m_kwinSide, m_kwinPos, m_kwinScreen);
+    });
+    if (KWinBridge::isKWin()) connect(KWinBridge::instance(), &KWinBridge::edgeHit, this, [this](const QString &side, double pos, const QString &screen) {
+        m_kwinSide = side; m_kwinPos = pos; m_kwinScreen = screen;
+        if (side.isEmpty() || !m_kwinLinks.contains(side)) m_kwinDwell.stop(); else m_kwinDwell.start();
+    });
     // связь оборвалась — захват снимается сразу, иначе мышь и клавиатура остались бы у пропавшего соседа
     connect(manager, &PeerManager::deviceDisconnected, this, [this](const QString &id) {
         if (id == m_to) comeBack(m_pos);
@@ -80,7 +94,9 @@ EdgeCrossing::~EdgeCrossing()
 bool EdgeCrossing::available()
 {
 #ifdef ORBIT_DESKTOP_LINUX
-    return !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE") && InputInjector::isAvailable() && access("/dev/input/event0", R_OK) == 0;
+    // Hyprland — через его сокет; KDE Plasma — через скрипты KWin (KWinBridge); driftwm положение курсора не сообщает
+    const bool comp = !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE") || KWinBridge::isKWin();
+    return comp && InputInjector::isAvailable() && access("/dev/input/event0", R_OK) == 0;
 #else
     return false;
 #endif
@@ -93,7 +109,17 @@ QByteArray EdgeCrossing::hypr(const QByteArray &request) { return HyprIpc::reque
 // монитор по имени или самый крайний со стороны side; координаты раскладки (логические, с учётом масштаба и поворота)
 QRectF EdgeCrossing::monitorAt(const QString &side, const QString &name, QString *outName)
 {
-    const QJsonArray mons = QJsonDocument::fromJson(hypr("j/monitors")).array();
+    QJsonArray mons;
+    if (KWinBridge::isKWin()) {
+        // KDE Plasma: мониторы — экраны Qt (их геометрия уже логическая, с масштабом и поворотом)
+        for (const QScreen *s : QGuiApplication::screens()) {
+            const QRect g = s->geometry();
+            QJsonObject m;
+            m[QStringLiteral("name")] = s->name(); m[QStringLiteral("x")] = g.x(); m[QStringLiteral("y")] = g.y();
+            m[QStringLiteral("width")] = g.width(); m[QStringLiteral("height")] = g.height(); m[QStringLiteral("scale")] = 1.0;
+            mons.append(m);
+        }
+    } else mons = QJsonDocument::fromJson(hypr("j/monitors")).array();
     QRectF best; QString bestName;
     for (const QJsonValue &v : mons) {
         const QJsonObject m = v.toObject();
@@ -121,10 +147,16 @@ static QPointF edgePoint(const QRectF &m, const QString &side, double pos, doubl
     return {m.left() + pos * (m.width() - 1), m.bottom() - inset};
 }
 
-static void warpTo(const QPointF &p)
+// курсор переставляет композитор (Hyprland) или абсолютное устройство (KDE Plasma); варп в Hyprland — не событие ввода,
+// поэтому окно под курсором узнает о нём при первом движении
+void EdgeCrossing::warpTo(const QPointF &p) { m_inj.warpLayout(p); }
+
+// где курсор: сокет Hyprland или последнее, что сообщил скрипт KWin
+QPointF EdgeCrossing::cursorPos() const
 {
-    // курсор переставляет композитор; варп сам по себе не событие ввода, поэтому окно под курсором узнает о нём при первом движении
-    HyprIpc::request(QStringLiteral("dispatch hl.dsp.cursor.move({ x = %1, y = %2 })").arg(qRound(p.x())).arg(qRound(p.y())).toUtf8());
+    if (KWinBridge::isKWin()) return KWinBridge::instance()->cursor();
+    const QJsonObject c = QJsonDocument::fromJson(hypr("j/cursorpos")).object();
+    return QPointF(c.value(QStringLiteral("x")).toDouble(), c.value(QStringLiteral("y")).toDouble());
 }
 
 void EdgeCrossing::emitCrossing(const QString &dir, const QString &side, double pos, const QString &screen, const QString &peer)
@@ -150,6 +182,13 @@ bool EdgeCrossing::crossTo(const QString &deviceId, const QString &side, double 
     m_answerT.start();
     emit activeChanged();
     return true;
+}
+
+void EdgeCrossing::setKwinLinks(const QVariantMap &links)
+{
+    m_kwinLinks.clear();
+    for (auto it = links.constBegin(); it != links.constEnd(); ++it) if (!it.value().toString().isEmpty()) m_kwinLinks.insert(it.key(), it.value());
+    if (KWinBridge::isKWin()) KWinBridge::instance()->setEdgeWatch(available() && !m_kwinLinks.isEmpty());
 }
 
 void EdgeCrossing::stop()
@@ -330,6 +369,7 @@ void EdgeCrossing::enter(const QString &deviceId, const QString &side, double po
     if (!m_inj.isOpen() && !m_inj.openDevice()) { deny(m_inj.lastError()); return; }
     m_from = deviceId; m_inSide = side; m_push = 0; m_down.clear();
     m_mon = monitorAt(side, QString(), &m_inScreen);
+    if (KWinBridge::isKWin()) KWinBridge::instance()->setTracking(true);      // KDE Plasma: положение курсора сообщает скрипт KWin
     if (!m_mon.isNull()) warpTo(edgePoint(m_mon, side, pos, 2));
     QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("entered");
     m_manager->sendPlugin(deviceId, name(), p);
@@ -347,12 +387,12 @@ void EdgeCrossing::leave(bool tellPeer)
     m_down.clear();
     m_edgeT.stop();
     double pos = 0.5;
-    const QJsonObject c = QJsonDocument::fromJson(hypr("j/cursorpos")).object();
+    const QPointF c = cursorPos();
     if (!m_mon.isNull()) {
         const bool vertical = m_inSide == QLatin1String("left") || m_inSide == QLatin1String("right");
-        pos = vertical ? (c.value(QStringLiteral("y")).toDouble() - m_mon.top()) / qMax(1.0, m_mon.height())
-                       : (c.value(QStringLiteral("x")).toDouble() - m_mon.left()) / qMax(1.0, m_mon.width());
+        pos = vertical ? (c.y() - m_mon.top()) / qMax(1.0, m_mon.height()) : (c.x() - m_mon.left()) / qMax(1.0, m_mon.width());
     }
+    if (KWinBridge::isKWin()) KWinBridge::instance()->setTracking(false);
     if (tellPeer) { QJsonObject p; p[QStringLiteral("kind")] = QStringLiteral("back"); p[QStringLiteral("pos")] = qBound(0.0, pos, 1.0); m_manager->sendPlugin(m_from, name(), p); }
     const QString peer = m_manager->trustStore()->device(m_from).name;
     m_from.clear();
@@ -363,8 +403,9 @@ void EdgeCrossing::leave(bool tellPeer)
 void EdgeCrossing::checkEdge()
 {
     if (m_from.isEmpty() || m_mon.isNull()) return;
-    const QJsonObject c = QJsonDocument::fromJson(hypr("j/cursorpos")).object();
-    const double x = c.value(QStringLiteral("x")).toDouble(), y = c.value(QStringLiteral("y")).toDouble();
+    if (KWinBridge::isKWin() && !KWinBridge::instance()->haveCursor()) return;      // скрипт KWin ещё не сообщил, где курсор
+    const QPointF c = cursorPos();
+    const double x = c.x(), y = c.y();
     bool atEdge = false;
     if (m_inSide == QLatin1String("left")) atEdge = x <= m_mon.left() + 1 && y >= m_mon.top() && y <= m_mon.bottom();
     else if (m_inSide == QLatin1String("right")) atEdge = x >= m_mon.right() - 2 && y >= m_mon.top() && y <= m_mon.bottom();

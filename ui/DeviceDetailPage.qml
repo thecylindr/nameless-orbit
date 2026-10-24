@@ -34,8 +34,18 @@ Page {
     property bool trackPlaying: false
     property var remoteCommands: RunCommand.remoteCommands(deviceId)       // из кэша: список есть сразу при открытии страницы
 
-    function refreshBattery() { battery = Battery.hasRemote(deviceId) ? Battery.remotePercent(deviceId) : -1; charging = Battery.remoteCharging(deviceId); }
-    Component.onCompleted: { refreshBattery(); if (confirmed) RunCommand.requestCommands(deviceId); }
+    property int brightness: -1
+    property var media: ({})
+    property real now: Date.now()
+    // батарея — только у тех, у кого она бывает (у ПК старые версии присылали 0 %)
+    readonly property bool hasBattery: battery >= 0 && ["phone", "tablet", "laptop"].indexOf(live ? live.kind : (trusted ? trusted.kind : "")) >= 0
+    function refreshBattery() { battery = Battery.hasRemote(deviceId) ? Battery.remotePercent(deviceId) : -1; charging = Battery.remoteCharging(deviceId); brightness = Battery.remoteBrightness(deviceId); }
+    function refreshMedia() { media = Media.remoteMedia(deviceId); }
+    // позиция трека досчитывается от момента получения, пока играет
+    Timer { interval: 1000; repeat: true; running: page.media.playing === true; onTriggered: page.now = Date.now() }
+    readonly property real mediaPos: (media.pos || 0) + (media.playing ? Math.max(0, now - (media.at || now)) : 0)
+    function fmtTime(ms) { var t = Math.floor(ms / 1000); return Math.floor(t / 60) + ":" + ("0" + t % 60).slice(-2); }
+    Component.onCompleted: { refreshBattery(); refreshMedia(); if (confirmed) RunCommand.requestCommands(deviceId); }
     onConfirmedChanged: if (confirmed) RunCommand.requestCommands(deviceId)       // сопряжение подтверждено — просим список команд
 
     // выбор файлов для отправки; на компьютере файлы можно и просто перетащить на страницу
@@ -67,6 +77,7 @@ Page {
             if (id !== page.deviceId) return;
             page.trackTitle = title; page.trackArtist = artist; page.trackPlaying = playing;
         }
+        function onRemoteMediaChanged(id) { if (id === page.deviceId) page.refreshMedia(); }
     }
     Connections {
         target: RunCommand
@@ -81,7 +92,7 @@ Page {
             x: 116; anchors.verticalCenter: parent.verticalCenter
             Text { text: page.devName; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 18; font.weight: Font.Bold }
             Text {
-                text: [page.live ? page.live.model : "", page.live ? page.live.address : "", page.battery >= 0 ? page.battery + "%" + (page.charging ? " ⚡" : "") : ""].filter(function (x) { return x; }).join(" · ")
+                text: [page.live ? page.live.model : "", page.live ? page.live.address : ""].filter(function (x) { return x; }).join(" · ")
                 color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 12
             }
         }
@@ -116,67 +127,126 @@ Page {
                 Text { id: waitTxt; x: 16; y: 14; width: parent.width - 32; wrapMode: Text.WordWrap; text: qsTr("Ждём подтверждения на втором устройстве. Откройте там Orbit и нажмите «Коды совпадают — сопрячь»: после этого здесь появятся файлы, экран, плеер и команды."); color: Theme.warn; font.family: Theme.fontFamily; font.pixelSize: 12 }
             }
 
-            // действия сгруппированы по смыслу, у каждой кнопки понятное название; серая кнопка объясняется строкой ниже
-            Section { title: qsTr("Файлы и сообщения"); visible: page.online && page.confirmed
-                Flow {
-                    width: parent.width; spacing: 8
-                    Common.GlassButton { enabled: page.can("share"); icon: "send"; text: qsTr("Отправить файл"); primary: true; onClicked: fileDialog.open() }
-                    Common.GlassButton { enabled: page.can("clipboard"); icon: "clipboard"; text: qsTr("Отправить буфер"); onClicked: Clipboard.sendClipboardTo(page.deviceId) }
-                    Common.GlassButton { enabled: page.can("notifications"); icon: "bell"; text: qsTr("Тест-уведомление"); onClicked: Notifications.sendTo(page.deviceId, "Orbit", qsTr("Проверка связи с ") + Identity.deviceName) }
-                }
-                Text {
-                    visible: !IsMobile
-                    width: parent.width; wrapMode: Text.WordWrap
-                    text: qsTr("Файлы можно просто перетащить на это окно.")
-                    color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 11
+            // состояние устройства: заряд и яркость экрана полосами (заряд — только у телефона, планшета, ноутбука)
+            Rectangle {
+                visible: page.online && (page.hasBattery || page.brightness >= 0)
+                width: parent.width; height: stateCol.implicitHeight + 28; radius: Theme.radius
+                color: Theme.surface; border.width: 1; border.color: Theme.line
+                Column {
+                    id: stateCol
+                    x: 16; y: 14; width: parent.width - 32
+                    spacing: 10
+                    Repeater {
+                        model: [{ show: page.hasBattery, icon: "battery", t: qsTr("Заряд"), v: page.battery, extra: page.charging ? qsTr(" · заряжается") : "",
+                                  c: page.battery < 20 && !page.charging ? Theme.danger : (page.charging ? Theme.good : Theme.accent) },
+                                { show: page.brightness >= 0, icon: "bolt", t: qsTr("Яркость экрана"), v: page.brightness, extra: "", c: Theme.warn }]
+                        Column {
+                            required property var modelData
+                            visible: modelData.show
+                            width: stateCol.width; spacing: 6
+                            Row {
+                                width: parent.width; spacing: 8
+                                Common.Icon { name: modelData.icon; size: 16; color: modelData.c }
+                                Text { text: modelData.t; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 13 }
+                                Text { text: modelData.v + "%" + modelData.extra; color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 13; font.weight: Font.DemiBold }
+                            }
+                            Rectangle {
+                                width: parent.width; height: 8; radius: 4; color: Theme.surfaceHigh
+                                Rectangle { width: parent.width * Math.max(0, Math.min(1, modelData.v / 100)); height: parent.height; radius: 4; color: modelData.c; Behavior on width { NumberAnimation { duration: 300 } } }
+                            }
+                        }
+                    }
                 }
             }
 
-            Section { title: qsTr("Найти устройство"); visible: page.online && page.confirmed && page.can("find")
-                Flow {
-                    width: parent.width; spacing: 8
-                    Common.GlassButton { icon: "speaker"; text: qsTr("Позвонить"); primary: true; onClicked: FindDevice.ring(page.deviceId) }
-                    Common.GlassButton { icon: "stop"; text: qsTr("Отменить звонок"); onClicked: FindDevice.stop(page.deviceId) }
+            // сейчас играет: обложка, трек, приложение, прогресс, крупные кнопки
+            Rectangle {
+                visible: page.online && page.confirmed && page.can("media") && (page.media.title || "") !== ""
+                width: parent.width; height: IsMobile ? 132 : 112; radius: Theme.radius
+                color: Theme.surface; border.width: 1; border.color: Theme.line
+                Rectangle {
+                    id: artBox
+                    x: 14; anchors.verticalCenter: parent.verticalCenter
+                    width: parent.height - 28; height: width; radius: 12
+                    color: Theme.surfaceHigh; clip: true
+                    Image {
+                        anchors.fill: parent; fillMode: Image.PreserveAspectCrop; asynchronous: true
+                        source: page.media.art ? "data:image/jpeg;base64," + page.media.art : (page.media.artUrl || "")
+                        visible: status === Image.Ready
+                    }
+                    Common.Icon { anchors.centerIn: parent; visible: !page.media.art && !page.media.artUrl; name: "speaker"; size: 30; color: Theme.subtext }
+                }
+                Column {
+                    anchors { left: artBox.right; leftMargin: 14; right: parent.right; rightMargin: 14; top: artBox.top }
+                    spacing: 3
+                    Text { width: parent.width; elide: Text.ElideRight; text: page.media.title || ""; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 15; font.weight: Font.DemiBold }
+                    Text { width: parent.width; elide: Text.ElideRight; text: [page.media.artist, page.media.app].filter(function (x) { return x; }).join(" · "); color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                    Item {
+                        visible: (page.media.len || 0) > 0
+                        width: parent.width; height: 16
+                        Rectangle {
+                            anchors.verticalCenter: parent.verticalCenter; width: parent.width - 84; height: 4; radius: 2; color: Theme.surfaceHigh
+                            Rectangle { width: parent.width * Math.min(1, page.mediaPos / Math.max(1, page.media.len)); height: parent.height; radius: 2; color: Theme.accent }
+                        }
+                        Text { anchors { right: parent.right; verticalCenter: parent.verticalCenter } text: page.fmtTime(Math.min(page.mediaPos, page.media.len)) + " / " + page.fmtTime(page.media.len); color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 10 }
+                    }
+                }
+                Row {
+                    anchors { left: artBox.right; leftMargin: 10; bottom: artBox.bottom }
+                    spacing: 6
+                    Common.GlassButton { icon: "prev"; text: ""; onClicked: Media.sendCommand(page.deviceId, "previous") }
+                    Common.GlassButton { icon: page.media.playing ? "pause" : "play"; text: ""; primary: true; onClicked: Media.sendCommand(page.deviceId, "playpause") }
+                    Common.GlassButton { icon: "next"; text: ""; onClicked: Media.sendCommand(page.deviceId, "next") }
                 }
             }
 
-            Section { title: qsTr("Экран"); visible: page.online && page.confirmed
-                Flow {
-                    width: parent.width; spacing: 8
-                    Common.GlassButton {
-                        enabled: page.can("remoteDesktop"); icon: "monitor"; text: qsTr("Смотреть его экран"); primary: true
-                        onClicked: { RemoteDesktop.requestShare(page.deviceId); page.openScreen(page.deviceId); }
-                    }
-                    Common.GlassButton {
-                        visible: RemoteDesktop.captureAvailable
-                        enabled: page.can("remoteDesktop") && Settings.remoteDesktopFeatureEnabled
-                        icon: "upload"; text: qsTr("Показать ему мой экран")
-                        onClicked: RemoteDesktop.offerShare(page.deviceId)
-                    }
-                    // этот компьютер сам предлагает устройству стать вторым экраном (устройство получит запрос и займёт весь экран)
-                    Common.GlassButton {
-                        visible: RemoteDesktop.secondBackend !== ""
-                        enabled: page.can("remoteDesktop") && Settings.remoteDesktopFeatureEnabled
-                        icon: "monitor"; text: qsTr("Сделать его вторым монитором")
-                        onClicked: secondDialog.openFor(page.deviceId, "offer")
-                    }
-                    // наоборот: это устройство просит стать вторым экраном другого
-                    Common.GlassButton {
-                        enabled: page.can("remoteDesktop"); icon: "monitor"; text: qsTr("Стать его вторым монитором")
-                        onClicked: secondDialog.openFor(page.deviceId, "request")
+            // действия — плитками с подписями: крупные под палец на телефоне; серая плитка объясняется строкой ниже
+            Section { title: qsTr("Действия"); visible: page.online && page.confirmed
+                Grid {
+                    id: acts
+                    width: parent.width
+                    columns: IsMobile ? 3 : 4
+                    spacing: 8
+                    readonly property real cw: (width - spacing * (columns - 1)) / columns
+                    Repeater {
+                        model: [
+                            { icon: "send", t: qsTr("Файл"), on: page.can("share"), f: function () { fileDialog.open(); } },
+                            { icon: "clipboard", t: qsTr("Буфер"), on: page.can("clipboard"), f: function () { Clipboard.sendClipboardTo(page.deviceId); } },
+                            { icon: "speaker", t: qsTr("Найти"), on: page.can("find"), f: function () { FindDevice.ring(page.deviceId); } },
+                            { icon: "monitor", t: qsTr("Его экран"), on: page.can("remoteDesktop"), f: function () { RemoteDesktop.requestShare(page.deviceId); page.openScreen(page.deviceId); } },
+                            { icon: "upload", t: qsTr("Мой экран"), show: RemoteDesktop.captureAvailable, on: page.can("remoteDesktop") && Settings.remoteDesktopFeatureEnabled, f: function () { RemoteDesktop.offerShare(page.deviceId); } },
+                            { icon: "monitor", t: qsTr("Сделать вторым экраном"), show: RemoteDesktop.secondBackend !== "", on: page.can("remoteDesktop") && Settings.remoteDesktopFeatureEnabled, f: function () { secondDialog.openFor(page.deviceId, "offer"); } },
+                            { icon: "expand", t: qsTr("Стать его 2-м экраном"), on: page.can("remoteDesktop"), f: function () { secondDialog.openFor(page.deviceId, "request"); } },
+                            { icon: "bell", t: qsTr("Проверить связь"), on: page.can("notifications"), f: function () { Notifications.sendTo(page.deviceId, "Orbit", qsTr("Проверка связи с ") + Identity.deviceName); } }
+                        ].filter(function (x) { return x.show !== false; })
+                        Rectangle {
+                            id: tile
+                            required property var modelData
+                            width: acts.cw; height: IsMobile ? 84 : 76; radius: 14
+                            opacity: modelData.on ? 1 : 0.4
+                            color: tMa.pressed ? Theme.surfaceHigh : (tMa.containsMouse ? Qt.lighter(Theme.surface, 1.3) : Theme.surfaceHigh)
+                            Column {
+                                anchors.centerIn: parent
+                                width: parent.width - 12
+                                spacing: 6
+                                Common.Icon { anchors.horizontalCenter: parent.horizontalCenter; name: tile.modelData.icon; size: 22; color: Theme.accent }
+                                Text { width: parent.width; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.WordWrap; maximumLineCount: 2; text: tile.modelData.t; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 12 }
+                            }
+                            MouseArea { id: tMa; anchors.fill: parent; enabled: tile.modelData.on; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: tile.modelData.f() }
+                        }
                     }
                 }
-                // почему кнопка серая: чего не хватает и где это включить
+                Common.GlassButton { visible: page.can("find"); icon: "stop"; text: qsTr("Отменить звонок"); onClicked: FindDevice.stop(page.deviceId) }
+                // почему плитка серая: чего не хватает и где это включить
                 Text {
                     visible: text !== ""
                     width: parent.width; wrapMode: Text.WordWrap
                     text: {
                         var h = [];
                         if (!page.can("remoteDesktop")) h.push(qsTr("Экран недоступен: на другом устройстве включите показ экрана в его настройках и разрешение «Демонстрация экрана» для этого устройства."));
-                        else if (RemoteDesktop.captureAvailable && !Settings.remoteDesktopFeatureEnabled) h.push(qsTr("«Показать ему мой экран» и «Сделать его вторым монитором» включаются в настройках здесь («Удалённый доступ» / «Показ экрана»)."));
-                        // «Стать его вторым монитором» работает, только если у другого компьютера есть где создать монитор (Hyprland, driftwm); старые версии Orbit это не сообщают
-                        else if (!page.can("secondScreen")) h.push(qsTr("«Стать его вторым монитором»: у другого устройства не нашлось Hyprland или driftwm (или у него старая версия Orbit, ниже 0.2.2). Второй монитор можно создать только на компьютере с Hyprland; обратное направление — кнопка «Сделать его вторым монитором»."));
-                        if (!page.can("share") || !page.can("clipboard")) h.push(qsTr("Серые кнопки: другое устройство не разрешило функцию — разрешения на его странице этого устройства."));
+                        else if (RemoteDesktop.captureAvailable && !Settings.remoteDesktopFeatureEnabled) h.push(qsTr("«Мой экран» и «Сделать вторым экраном» включаются в настройках здесь («Удалённый доступ» / «Показ экрана»)."));
+                        if (!page.can("share") || !page.can("clipboard")) h.push(qsTr("Серые плитки: другое устройство не разрешило функцию — разрешения на его странице этого устройства."));
+                        if (!IsMobile) h.push(qsTr("Файлы можно просто перетащить на это окно."));
                         return h.join("\n");
                     }
                     color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 11
@@ -212,24 +282,19 @@ Page {
                 Common.GlassButton { text: qsTr("Очистить список"); onClicked: Share.clearFinished() }
             }
 
-            Section { title: qsTr("Медиа"); visible: page.online && page.confirmed
+            Section { title: qsTr("Плеер"); visible: page.online && page.confirmed && (page.media.title || "") === ""
                 Text {
-                    width: parent.width; elide: Text.ElideRight
-                    text: page.trackTitle !== "" ? page.trackTitle + (page.trackArtist !== "" ? " — " + page.trackArtist : "") : qsTr("Ничего не играет")
-                    color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: 13
+                    width: parent.width; wrapMode: Text.WordWrap
+                    text: !page.can("media") ? qsTr("Управление плеером выключено на другом устройстве.")
+                          : qsTr("Ничего не играет. На компьютере нужен плеер с MPRIS; на телефоне — разрешение «Доступ к уведомлениям» для Orbit (Настройки Orbit на телефоне → «Показывать, что играет»).")
+                    color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 12
                 }
                 Row {
                     spacing: 8
                     enabled: page.can("media")
                     Common.GlassButton { icon: "prev"; text: ""; onClicked: Media.sendCommand(page.deviceId, "previous") }
-                    Common.GlassButton { icon: page.trackPlaying ? "pause" : "play"; text: ""; primary: true; onClicked: Media.sendCommand(page.deviceId, "playpause") }
+                    Common.GlassButton { icon: "play"; text: ""; primary: true; onClicked: Media.sendCommand(page.deviceId, "playpause") }
                     Common.GlassButton { icon: "next"; text: ""; onClicked: Media.sendCommand(page.deviceId, "next") }
-                }
-                Text {
-                    visible: !page.can("media") || (page.trackTitle === "" && !page.trackPlaying)
-                    width: parent.width; wrapMode: Text.WordWrap
-                    text: !page.can("media") ? qsTr("Управление плеером выключено на другом устройстве.") : qsTr("Запустите плеер (с MPRIS) на другом устройстве — здесь появится трек.")
-                    color: Theme.subtext; font.family: Theme.fontFamily; font.pixelSize: 11
                 }
             }
 
@@ -283,7 +348,7 @@ Page {
                         { id: "share", t: qsTr("Файлы"), s: qsTr("присылать вам файлы (каждый — с вашего согласия)") },
                         { id: "clipboard", t: qsTr("Буфер обмена"), s: qsTr("принимать текст в ваш буфер") },
                         { id: "notifications", t: qsTr("Уведомления"), s: qsTr("показывать его уведомления у вас") },
-                        { id: "battery", t: qsTr("Заряд батареи"), s: qsTr("видеть заряд этого компьютера") },
+                        { id: "battery", t: qsTr("Заряд и яркость"), s: qsTr("видеть заряд и яркость экрана этого устройства") },
                         { id: "find", t: qsTr("Найти устройство"), s: qsTr("заставить этот компьютер сигналить") },
                         { id: "media", t: qsTr("Управление плеером"), s: qsTr("пауза, вперёд, назад") },
                         { id: "runcommand", t: qsTr("Запуск команд"), s: qsTr("только из вашего списка в настройках") },

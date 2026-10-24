@@ -24,6 +24,7 @@ bool SettingsManager::notificationsAllowed() const { return PlatformBridge::noti
 void SettingsManager::requestNotificationPermission() const { PlatformBridge::requestNotificationPermission(); }
 void SettingsManager::openNotificationSettings() const { PlatformBridge::openNotificationSettings(); }
 void SettingsManager::openBatterySettings() const { PlatformBridge::openBatterySettings(); }
+void SettingsManager::moveToBack() const { PlatformBridge::moveToBack(); }
 void SettingsManager::testNotification() const { PlatformBridge::postNotification(QStringLiteral("NameLess Orbit"), QStringLiteral("Так выглядят уведомления от других устройств"), true); }
 
 QString SettingsManager::configureCodexNotifications()

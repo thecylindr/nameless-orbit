@@ -32,6 +32,14 @@ void setLoudVolume(bool on);
 // плеер этого устройства без MPRIS (Android): нажатие медиа-клавиши («playpause» | «next» | «previous») и «играет ли сейчас звук»
 void mediaKey(const QString &action);
 bool musicActive();
+// Android: что играет — JSON медиасессии ({ access, title, artist, album, app, playing, pos, len, art, artKey }); пусто — недоступно.
+// mediaCommand — команда прямо в сессию плеера (false — сессии нет); mediaAccess / openMediaAccess — доступ к уведомлениям
+QByteArray mediaJson();
+bool mediaCommand(const QString &action);
+bool mediaAccess();
+void openMediaAccess();
+// яркость экрана 0..100 (Android — системная настройка); -1 — неизвестна
+int screenBrightness();
 
 // встроенные действия телефона для «Запуска команд» (на Android оболочки нет): «flashlight» — фонарик вкл/выкл. true — выполнено
 bool runAction(const QString &action);
@@ -42,8 +50,11 @@ bool runAction(const QString &action);
 // сохранено (для показа), пустая строка — не вышло. Исходный временный файл при успехе удаляется
 QString publishDownload(const QString &srcPath, const QString &fileName);
 
-void startBackgroundService();
+// quietNotice — уведомление о работе в фоне скрыто (Android: выключенный канал; служба работает как обычно)
+void startBackgroundService(bool quietNotice = true);
 void stopBackgroundService();
+// Android: свернуть приложение вместо закрытия («Назад» на главной странице при работе в фоне); на остальных ничего
+void moveToBack();
 void setBackgroundStatus(const QString &text);      // Android: строка постоянного уведомления службы («Подключено: …», «Нет связи …»); пустого уведомления не бывает
 // force — показать даже когда окно приложения на виду (пробное уведомление); иначе уведомление не дублирует то, что человек и так видит в окне,
 // и одинаковый текст подряд (несколько секунд) показывается один раз
