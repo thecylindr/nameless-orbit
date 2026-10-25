@@ -27,6 +27,7 @@ void SettingsManager::openBatterySettings() const { PlatformBridge::openBatteryS
 bool SettingsManager::batteryUnrestricted() const { return PlatformBridge::batteryUnrestricted(); }
 void SettingsManager::requestBatteryUnrestricted() const { PlatformBridge::requestBatteryUnrestricted(); }
 void SettingsManager::moveToBack() const { PlatformBridge::moveToBack(); }
+void SettingsManager::quitApp() const { PlatformBridge::stopBackgroundService(); QCoreApplication::quit(); }
 void SettingsManager::testNotification() const { PlatformBridge::postNotification(QStringLiteral("NameLess Orbit"), QStringLiteral("Так выглядят уведомления от других устройств"), true); }
 
 QString SettingsManager::configureCodexNotifications()

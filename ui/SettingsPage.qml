@@ -418,7 +418,7 @@ Text { visible: RemoteDesktop.secondBackend === "Hyprland"; text: qsTr("Рядо
                 Common.GlassSwitch {
                     width: parent.width
                     label: IsMobile ? qsTr("Работать в фоне") : qsTr("Работать в фоне после закрытия окна")
-                    sub: IsMobile ? qsTr("«Назад» сворачивает Orbit, связь не засыпает при свёрнутом приложении") : qsTr("NameLess UI видит устройства и подключает их без окна")
+                    sub: IsMobile ? qsTr("«Назад» и смахивание из недавних не останавливают связь; совсем выйти — «Завершить Orbit» ниже") : qsTr("NameLess UI видит устройства и подключает их без окна")
                     checked: Settings.keepRunning; onToggled: v => Settings.keepRunning = v
                 }
                 Common.GlassSwitch {
@@ -449,7 +449,8 @@ Text { visible: RemoteDesktop.secondBackend === "Hyprland"; text: qsTr("Рядо
                     sub: qsTr("постоянная строка в шторке; выключено — Orbit работает так же, но без уведомления")
                     checked: Settings.backgroundNotice; onToggled: v => Settings.backgroundNotice = v
                 }
-                Common.GlassButton { visible: !IsMobile; text: qsTr("Завершить Orbit"); onClicked: Qt.quit() }
+                // на телефоне смахивание из недавних Orbit не останавливает (связь идёт без окна) — выход совсем только здесь
+                Common.GlassButton { text: qsTr("Завершить Orbit"); onClicked: Settings.quitApp() }
                 Common.GlassSwitch { visible: !IsMobile; width: parent.width; label: qsTr("Запускать свёрнутым"); checked: Settings.startMinimized; onToggled: v => Settings.startMinimized = v }
             }
 

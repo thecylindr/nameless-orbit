@@ -26,11 +26,23 @@ public class OrbitActivity extends QtActivity {
         instance = this;
     }
 
-    // Приложение закрыто (смахнули из недавних, «закрыть»): всё, что работало в фоне, останавливается вместе с ним. Иначе службы живут
-    // в процессе без интерфейса Qt и обращаются в уже остановленную C++ часть — отсюда ошибка «приложение остановилось» в фоне
+    // Приложение закрыто (смахнули из недавних, «закрыть»).
+    // Работа в фоне включена (служба запущена): Qt 6 при уничтожении окна сам завершает процесс (QtActivityBase.onDestroy → System.exit),
+    // и служба переднего плана умирала вместе с ним — связь рвалась. Флаг «окно пересоздаётся» (тот же, что при повороте экрана) оставляет
+    // C++ часть работать без окна: связь, буфер, уведомления, файлы идут дальше. Новое окно Qt к работающему приложению не подключает —
+    // при следующем открытии он сам перезапускает процесс (QtActivityBase.restartApplication), служба поднимается заново.
+    // Работа в фоне выключена: всё, что работало в фоне, останавливается вместе с окном — иначе службы жили бы в процессе
+    // без C++ части и обращались в неё (ошибка «приложение остановилось»)
     @Override
     protected void onDestroy() {
         if (instance == this) instance = null;
+        if (!isChangingConfigurations() && OrbitService.isAlive() && keepQtAlive()) {
+            try { OrbitCaptureService.stop(this); } catch (Throwable ignored) { }        // показ экрана без окна не продолжается
+            try { OrbitVideoDecoder.stop(); } catch (Throwable ignored) { }
+            try { OrbitService.keepAwake(this, false); } catch (Throwable ignored) { }
+            super.onDestroy();
+            return;
+        }
         if (isFinishing()) {
             try { OrbitCaptureService.stop(this); } catch (Throwable ignored) { }
             try { OrbitVideoDecoder.stop(); } catch (Throwable ignored) { }
@@ -38,6 +50,20 @@ public class OrbitActivity extends QtActivity {
             try { OrbitService.stop(this); } catch (Throwable ignored) { }
         }
         super.onDestroy();
+    }
+
+    // поле QtActivityBase.m_retainNonConfigurationInstance: true — Qt считает, что окно пересоздаётся, и не завершает процесс.
+    // Поле закрытое и может смениться в новой версии Qt — тогда просто прежнее поведение (процесс завершается вместе с окном)
+    private boolean keepQtAlive() {
+        try {
+            java.lang.reflect.Field f = org.qtproject.qt.android.QtActivityBase.class.getDeclaredField("m_retainNonConfigurationInstance");
+            f.setAccessible(true);
+            f.setBoolean(this, true);
+            return true;
+        } catch (Throwable e) {
+            android.util.Log.w("OrbitActivity", "Qt завершит процесс вместе с окном: " + e);
+            return false;
+        }
     }
 
     // из C++: «Назад» на главной странице при работе в фоне — приложение сворачивается, а не закрывается

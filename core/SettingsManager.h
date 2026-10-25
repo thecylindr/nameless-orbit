@@ -59,7 +59,8 @@ public:
     Q_INVOKABLE void openBatterySettings() const;
     Q_INVOKABLE bool batteryUnrestricted() const;       // Android: Orbit без ограничений батареи
     Q_INVOKABLE void requestBatteryUnrestricted() const;
-    Q_INVOKABLE void moveToBack() const;                // Android: свернуть приложение («Назад» на главной при работе в фоне)      // Android: окно «не ограничивать батарею» для Orbit      // показать пробное уведомление в шторке этого устройства
+    Q_INVOKABLE void moveToBack() const;
+    Q_INVOKABLE void quitApp() const;                   // выход совсем: служба фона останавливается, потом приложение                // Android: свернуть приложение («Назад» на главной при работе в фоне)      // Android: окно «не ограничивать батарею» для Orbit      // показать пробное уведомление в шторке этого устройства
 
     bool discoveryOnStart() const { return m_settings.value(QStringLiteral("discoveryOnStart"), true).toBool(); }
     void setDiscoveryOnStart(bool v) { m_settings.setValue(QStringLiteral("discoveryOnStart"), v); emit discoveryOnStartChanged(); }

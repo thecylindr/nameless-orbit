@@ -100,8 +100,12 @@ public class OrbitService extends Service {
     // не START_STICKY: систему не нужно просить перезапускать службу из фона — это запрещено правилами Android 12+ и вело к вылетам по кругу
     @Override public int onStartCommand(Intent intent, int flags, int startId) { return START_NOT_STICKY; }
 
-    // карточку приложения смахнули: служба не должна держать процесс без интерфейса
-    @Override public void onTaskRemoved(Intent rootIntent) { stopSelf(); super.onTaskRemoved(rootIntent); }
+    // карточку приложения смахнули: служба остаётся — C++ часть работает без окна (см. OrbitActivity.onDestroy).
+    // Если окно всё же завершило Qt (не удалось оставить его без окна), процесс уходит сам, вместе со службой
+    @Override public void onTaskRemoved(Intent rootIntent) { super.onTaskRemoved(rootIntent); }
+
+    // работает ли служба (из окна: оставлять ли Qt без окна)
+    public static boolean isAlive() { return alive; }
 
     @Override public void onDestroy() {
         alive = false;
@@ -134,7 +138,8 @@ public class OrbitService extends Service {
         }
     }
 
-    public static void stop(Context c) { c.stopService(new Intent(c, OrbitService.class)); }
+    // alive снимается сразу: окно, закрывающееся следом (выход из Orbit), не должно оставлять Qt работать без окна
+    public static void stop(Context c) { alive = false; c.stopService(new Intent(c, OrbitService.class)); }
 
     // уведомление о событии: запрос сопряжения, уведомление с другого устройства
     public static void notifyEvent(Context c, String title, String body) {

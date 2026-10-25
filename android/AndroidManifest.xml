@@ -66,7 +66,7 @@
         <service
             android:name="org.glassrice.namelessorbit.OrbitService"
             android:exported="false"
-            android:stopWithTask="true"
+            android:stopWithTask="false"
             android:foregroundServiceType="connectedDevice" />
 
         <service
