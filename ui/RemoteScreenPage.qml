@@ -36,7 +36,7 @@ Page {
     }
     // «Второй экран»: страница сразу на весь экран, ввод включён (касания = мышь на мониторе другого компьютера), ориентация — как выбрана
     readonly property bool second: RemoteDesktop.secondScreen
-    function enterSecond() { control = true; rot = RemoteDesktop.secondOrientation === 2 ? 2 : 1; fs = true; }
+    function enterSecond() { control = true; rot = RemoteDesktop.secondOrientation === 2 ? 2 : 1; fs = true; Qt.callLater(function () { view.forceActiveFocus(); }); }
     onSecondChanged: if (second) enterSecond()
     Component.onCompleted: if (second) enterSecond()
     onFsChanged: { applyView(); if (Window.window && Window.window.pageFullscreen !== undefined) Window.window.pageFullscreen = IsMobile && fs && !second; }
@@ -297,6 +297,7 @@ Page {
         // ---------- мышь ----------
         // положение мыши уходит не на каждое событие: ~30 раз в секунду, а на втором экране — ~100 (иначе курсор отстаёт от пальца и от картинки)
         QtObject { id: move; property real px: 0; property real py: 0; property bool moved: false }
+        QtObject { id: exitKeys; property int n: 0; property double at: 0 }
         Timer { interval: page.second ? 10 : 33; repeat: true; running: page.live && move.moved; onTriggered: { RemoteDesktop.sendMoveAbsolute(move.px, move.py); move.moved = false; } }
 
         MouseArea {
@@ -305,7 +306,8 @@ Page {
             enabled: !IsMobile
             hoverEnabled: true
             acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-            cursorShape: page.live ? Qt.CrossCursor : (page.zoom > 1.05 ? Qt.OpenHandCursor : Qt.ArrowCursor)
+            // второй экран: свой курсор скрыт — виден только курсор первого устройства в картинке (раньше их было два)
+            cursorShape: page.second ? Qt.BlankCursor : (page.live ? Qt.CrossCursor : (page.zoom > 1.05 ? Qt.OpenHandCursor : Qt.ArrowCursor))
             property point last
             function btn(b) { return b === Qt.RightButton ? "right" : (b === Qt.MiddleButton ? "middle" : "left"); }
             onPositionChanged: m => {
@@ -330,9 +332,17 @@ Page {
         }
 
         // ---------- клавиатура ----------
-        Keys.enabled: page.live
+        Keys.enabled: page.live || page.second
         Keys.onPressed: e => {
             if (e.key === Qt.Key_ScrollLock && page.kbPaused) { page.kbPaused = false; e.accepted = true; return; }     // снова отдать клавиатуру
+            // второй экран: выход — Ctrl+C трижды подряд (за 1,5 с); первые два нажатия уходят как обычно
+            if (page.second && e.key === Qt.Key_C && (e.modifiers & Qt.ControlModifier)) {
+                const now = Date.now();
+                exitKeys.n = now - exitKeys.at < 1500 ? exitKeys.n + 1 : 1;
+                exitKeys.at = now;
+                if (exitKeys.n >= 3) { exitKeys.n = 0; e.accepted = true; page.back(); return; }
+            }
+            if (!page.live) { e.accepted = true; return; }
             var name = page.keyName(e.key);
             var mods = [];
             if (e.modifiers & Qt.ControlModifier) mods.push("ctrl");
@@ -535,6 +545,21 @@ Page {
         Common.GlassButton { visible: IsMobile; icon: "expand"; text: page.fill ? qsTr("Заполнить") : qsTr("Вписать"); onClicked: { page.fill = !page.fill; regionT.restart(); view.clampPan(); } }
         Common.GlassButton { visible: IsMobile; icon: "refresh"; text: page.rotNames[page.rot]; onClicked: page.rot = (page.rot + 1) % 4 }
         Common.GlassButton { icon: "close"; text: IsMobile ? "" : qsTr("Выйти из полного экрана"); onClicked: page.fs = false }
+    }
+    // подсказка о выходе со второго экрана: курсора своего нет, кнопок тоже — первые секунды видно, как выйти
+    Rectangle {
+        id: exitHint
+        visible: opacity > 0
+        opacity: page.second && !IsMobile && exitHintT.running ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 300 } }
+        anchors { horizontalCenter: parent.horizontalCenter; top: parent.top; topMargin: 24 }
+        width: hintT.implicitWidth + 32; height: 40; radius: 20
+        color: Qt.rgba(0, 0, 0, 0.7)
+        z: 50
+        Text { id: hintT; anchors.centerIn: parent; text: qsTr("Второй экран · выход — Ctrl+C три раза"); color: "white"; font.pixelSize: 14 }
+        Timer { id: exitHintT; interval: 4500 }
+        Connections { target: page; function onSecondChanged() { if (page.second) exitHintT.restart(); } }
+        Component.onCompleted: if (page.second) exitHintT.restart()
     }
     Keys.onEscapePressed: page.fs = false
 

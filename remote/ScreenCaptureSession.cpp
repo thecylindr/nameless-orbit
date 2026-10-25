@@ -69,11 +69,13 @@ void ScreenCaptureSession::setMaxWidth(int w) { w = qBound(320, w, 3840); if (w 
 void ScreenCaptureSession::setRegion(const QRectF &r)
 {
     const QRectF n = r.isValid() ? r.intersected(QRectF(0, 0, 1, 1)) : QRectF(0, 0, 1, 1);
-    const bool changed = !qFuzzyCompare(n.x() + 1, m_region.x() + 1) || !qFuzzyCompare(n.y() + 1, m_region.y() + 1)
-        || !qFuzzyCompare(n.width(), m_region.width()) || !qFuzzyCompare(n.height(), m_region.height());
+    // мелкий сдвиг области (меньше 2 % экрана) кодер не перезапускает: при плавном увеличении на телефоне область меняется
+    // каждые несколько десятков миллисекунд, и перезапуски шли один за другим — картинка замирала
+    const double d = qMax(qMax(qAbs(n.x() - m_region.x()), qAbs(n.y() - m_region.y())), qMax(qAbs(n.width() - m_region.width()), qAbs(n.height() - m_region.height())));
+    m_forceKey = true;                                         // зритель сменил область — новый ключевой кадр, как и раньше
+    if (d < 1e-6 || (m_wfActive && d < 0.02)) return;
     m_region = n;
-    m_forceKey = true;
-    if (changed && m_wfActive) scheduleWfRestart(350);        // увеличение у зрителя — отклик важнее
+    if (m_wfActive) scheduleWfRestart(600);                    // перезапуск — когда жест увеличения закончился
 }
 
 void ScreenCaptureSession::log(const QString &line)

@@ -156,8 +156,14 @@ RemoteDesktopController::RemoteDesktopController(PeerManager *manager, SettingsM
                 if (cpuLag) { m_encCeilFps = qMax(20, m_capture.captureFps()); m_encCeilUntil = tNow + 60000; m_cpuLagSeconds = 0; }
                 // у видео каждая смена ступени — перезапуск кодера (чёрный кадр, ожидание ключевого): снижение — после 5 плохих секунд
                 // и не чаще раза в 10 с, иначе показ «мерцал» от постоянных перезапусков
-                const bool settled = !vid || tNow - m_levelSince >= 10000;
-                if (((++m_badSeconds >= (vid ? 5 : 3) && settled) || severe) && m_level < steps - 1) {
+                // первые 12 с после запуска кодера — разгон: первый ключевой кадр большой и на миг забивает очередь сокета, это не плохая сеть
+                // (раньше второй экран через 6 с после старта падал с 60 до 48 к/с с перезапуском кодера). У второго экрана (монитор)
+                // частота важнее всего: снижение — только если плохо 8 секунд подряд, и не чаще раза в 30 с
+                const bool monitor = m_ssFps > 0;
+                const bool warm = !vid || m_capture.encoderAgeMs() > 12000;
+                const bool settled = !vid || tNow - m_levelSince >= (monitor ? 30000 : 10000);
+                const int badNeed = !vid ? 3 : (monitor ? 8 : 5);
+                if (((++m_badSeconds >= badNeed && settled && warm) || (severe && warm)) && m_level < steps - 1) {
                     // подъём на эту ступень только что был и сорвался — в следующий раз на неё поднимаемся осторожнее (дольше ждём)
                     if (m_levelSince > 0 && tNow - m_levelSince < 15000) m_climbPenalty[m_level] = qMin(36, m_climbPenalty[m_level] * 2 + 3);
                     m_level = qMin(steps - 1, m_level + (severe ? 2 : 1));

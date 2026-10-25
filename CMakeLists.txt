@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(nameless-orbit VERSION 0.2.7 LANGUAGES CXX)
+project(nameless-orbit VERSION 0.2.8 LANGUAGES CXX)
 add_compile_definitions(APP_VERSION_STR="${PROJECT_VERSION}")
 
 set(CMAKE_CXX_STANDARD 20)
